@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Alex+Brush&display=swap');
 @import "tailwindcss";
 
 @layer utilities {
@@ -21,6 +21,6 @@
   }
 
   .font-signature {
-    font-family: 'Caveat', cursive;
+    font-family: 'Alex Brush', cursive;
   }
 }
