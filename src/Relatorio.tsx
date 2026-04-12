@@ -3,78 +3,68 @@ import { X, Minus, Square, FileText, Copy, Check, ChevronLeft, Printer, Image as
 import { motion, AnimatePresence } from 'motion/react';
 import { toBlob } from 'html-to-image';
 
-export type MandadoData = {
+export type RelatorioData = {
   directiveNo: string;
-  nomeOperacao: string;
-  requerenteNome: string;
-  requerenteBadge: string;
-  requerenteRank: string;
-  incidentes: string;
-  relatorios: string;
-  dataSolicitacao: string;
-  tipoMandado: string;
-  finalidade: string;
-  resumoFatos: string;
-  locaisBusca: string;
-  itensApreensao: string;
-  outrasMedidas: string;
-  juizAssinatura: string;
-  parecerJuiz?: string;
-  statusMandado?: string;
+  issueDate: string;
+  agentName: string;
+  operationName: string;
+  investigationDate: string;
+  classification: string;
+  objetivo: string;
+  organizacao: string;
+  historico: string;
+  analise: string;
+  inteligencia: string;
+  fundamentacao: string;
+  medidas: string;
+  conclusao: string;
+  agenteAssinatura: string;
+  diretorAssinatura: string;
 };
 
 export type Draft = {
   id: string;
   title: string;
   date: string;
-  data: MandadoData;
+  data: RelatorioData;
 };
 
-export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: { isMaximized: boolean, onClose: () => void, onMinimize: () => void, onMaximize: () => void }) {
+export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }: { isMaximized: boolean, onClose: () => void, onMinimize: () => void, onMaximize: () => void }) {
   const [view, setView] = useState<'form' | 'preview'>('form');
-  const [isJuizMode, setIsJuizMode] = useState(false);
+  const [isDiretorMode, setIsDiretorMode] = useState(false);
   const [isSignedMode, setIsSignedMode] = useState(false);
   const [linkGerado, setLinkGerado] = useState(false);
   const [linkAssinadoGerado, setLinkAssinadoGerado] = useState(false);
-  const [linkDevolvidoGerado, setLinkDevolvidoGerado] = useState(false);
   const [showDraftsModal, setShowDraftsModal] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [formData, setFormData] = useState<MandadoData>({
+  const [formData, setFormData] = useState<RelatorioData>({
     directiveNo: '',
-    nomeOperacao: '',
-    requerenteNome: '',
-    requerenteBadge: '',
-    requerenteRank: '',
-    incidentes: '',
-    relatorios: '',
-    dataSolicitacao: new Date().toISOString().split('T')[0],
-    tipoMandado: 'Busca e Apreensão',
-    finalidade: '',
-    resumoFatos: '',
-    locaisBusca: '',
-    itensApreensao: '',
-    outrasMedidas: '',
-    juizAssinatura: '',
-    parecerJuiz: '',
-    statusMandado: 'Aprovado'
+    issueDate: new Date().toISOString().split('T')[0],
+    agentName: '',
+    operationName: '',
+    investigationDate: '',
+    classification: 'CONFIDENTIAL',
+    objetivo: '',
+    organizacao: '',
+    historico: '',
+    analise: '',
+    inteligencia: '',
+    fundamentacao: '',
+    medidas: '',
+    conclusao: '',
+    agenteAssinatura: '',
+    diretorAssinatura: ''
   });
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const dataParam = params.get('data');
-    const modeParam = params.get('mode');
+    const dataParam = params.get('data_relatorio');
     if (dataParam) {
       try {
         const decoded = JSON.parse(decodeURIComponent(atob(dataParam)));
         setFormData(prev => ({ ...prev, ...decoded }));
-        
-        if (modeParam === 'agent') {
-          setIsJuizMode(false);
-        } else {
-          setIsJuizMode(true);
-        }
-        
-        if (decoded.juizAssinatura && decoded.juizAssinatura.trim() !== '') {
+        setIsDiretorMode(true);
+        if (decoded.diretorAssinatura && decoded.diretorAssinatura.trim() !== '') {
           setIsSignedMode(true);
         }
       } catch (e) {
@@ -83,7 +73,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
     }
 
     // Load drafts
-    const savedDrafts = localStorage.getItem('fib_mandados_drafts');
+    const savedDrafts = localStorage.getItem('fib_relatorios_drafts');
     if (savedDrafts) {
       try {
         setDrafts(JSON.parse(savedDrafts));
@@ -96,13 +86,13 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
   const saveDraft = () => {
     const newDraft: Draft = {
       id: Date.now().toString(),
-      title: formData.nomeOperacao || formData.directiveNo || 'Rascunho sem título',
+      title: formData.operationName || formData.directiveNo || 'Rascunho sem título',
       date: new Date().toLocaleString(),
       data: formData
     };
     const updatedDrafts = [newDraft, ...drafts];
     setDrafts(updatedDrafts);
-    localStorage.setItem('fib_mandados_drafts', JSON.stringify(updatedDrafts));
+    localStorage.setItem('fib_relatorios_drafts', JSON.stringify(updatedDrafts));
     alert('Rascunho salvo com sucesso!');
   };
 
@@ -114,16 +104,16 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
   const deleteDraft = (id: string) => {
     const updatedDrafts = drafts.filter(d => d.id !== id);
     setDrafts(updatedDrafts);
-    localStorage.setItem('fib_mandados_drafts', JSON.stringify(updatedDrafts));
+    localStorage.setItem('fib_relatorios_drafts', JSON.stringify(updatedDrafts));
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const gerarLinkJuiz = () => {
+  const gerarLinkDiretor = () => {
     const dataString = btoa(encodeURIComponent(JSON.stringify(formData)));
-    const url = `${window.location.origin}${window.location.pathname}?data=${dataString}&mode=juiz`;
+    const url = `${window.location.origin}${window.location.pathname}?data_relatorio=${dataString}`;
     navigator.clipboard.writeText(url);
     setLinkGerado(true);
     setTimeout(() => setLinkGerado(false), 3000);
@@ -131,18 +121,10 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
 
   const gerarLinkAssinado = () => {
     const dataString = btoa(encodeURIComponent(JSON.stringify(formData)));
-    const url = `${window.location.origin}${window.location.pathname}?data=${dataString}&mode=juiz`;
+    const url = `${window.location.origin}${window.location.pathname}?data_relatorio=${dataString}`;
     navigator.clipboard.writeText(url);
     setLinkAssinadoGerado(true);
     setTimeout(() => setLinkAssinadoGerado(false), 3000);
-  };
-
-  const gerarLinkDevolucao = () => {
-    const dataString = btoa(encodeURIComponent(JSON.stringify(formData)));
-    const url = `${window.location.origin}${window.location.pathname}?data=${dataString}&mode=agent`;
-    navigator.clipboard.writeText(url);
-    setLinkDevolvidoGerado(true);
-    setTimeout(() => setLinkDevolvidoGerado(false), 3000);
   };
 
   return (
@@ -161,7 +143,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
       <div className="h-10 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-3 select-none">
         <div className="flex items-center gap-2 text-slate-300">
           <img src="https://kappa.lol/TkFgCM" alt="Icon" className="w-5 h-5 rounded-sm" referrerPolicy="no-referrer" />
-          <span className="text-sm font-medium">F.I.B - Sistema de Mandados</span>
+          <span className="text-sm font-medium">F.I.B - Relatórios de Investigação</span>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={onMinimize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors">
@@ -184,10 +166,10 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
               <div className="flex items-center justify-between mb-8">
                 <h2 className="text-2xl font-semibold text-white flex items-center gap-2">
                   <FileText className="w-6 h-6 text-blue-400" />
-                  {isSignedMode ? 'Documento Assinado' : isJuizMode ? 'Revisão e Assinatura do Juiz' : 'Formulário de Solicitação'}
+                  {isSignedMode ? 'Documento Assinado' : isDiretorMode ? 'Revisão e Assinatura do Diretor' : 'Formulário de Relatório'}
                 </h2>
                 <div className="flex items-center gap-3">
-                  {!isJuizMode && (
+                  {!isDiretorMode && (
                     <>
                       <button 
                         onClick={() => setShowDraftsModal(true)}
@@ -204,92 +186,51 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
                         <Save className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={gerarLinkJuiz}
+                        onClick={gerarLinkDiretor}
                         className={`px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg ${
                           linkGerado ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20' : 'bg-slate-700 hover:bg-slate-600 text-white shadow-slate-900/20'
                         }`}
                       >
                         {linkGerado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        {linkGerado ? 'Link Copiado!' : 'Copiar Link p/ Juiz'}
+                        {linkGerado ? 'Link Copiado!' : 'Copiar Link p/ Diretor'}
                       </button>
                     </>
                   )}
-                  {isJuizMode && !isSignedMode && (
-                    <>
-                      <button 
-                        onClick={gerarLinkDevolucao}
-                        className={`px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg ${
-                          linkDevolvidoGerado ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/20' : 'bg-slate-700 hover:bg-slate-600 text-white shadow-slate-900/20'
-                        }`}
-                      >
-                        {linkDevolvidoGerado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        {linkDevolvidoGerado ? 'Link Copiado!' : 'Devolver p/ Agente'}
-                      </button>
-                      <button 
-                        onClick={gerarLinkAssinado}
-                        className={`px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg ${
-                          linkAssinadoGerado ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20' : 'bg-slate-700 hover:bg-slate-600 text-white shadow-slate-900/20'
-                        }`}
-                      >
-                        {linkAssinadoGerado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        {linkAssinadoGerado ? 'Link Copiado!' : 'Copiar Link Assinado'}
-                      </button>
-                    </>
+                  {isDiretorMode && !isSignedMode && (
+                    <button 
+                      onClick={gerarLinkAssinado}
+                      className={`px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg ${
+                        linkAssinadoGerado ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20' : 'bg-slate-700 hover:bg-slate-600 text-white shadow-slate-900/20'
+                      }`}
+                    >
+                      {linkAssinadoGerado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {linkAssinadoGerado ? 'Link Copiado!' : 'Copiar Link Assinado'}
+                    </button>
                   )}
                   <button 
                     onClick={() => setView('preview')}
                     className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg shadow-blue-900/20"
                   >
                     <Printer className="w-4 h-4" />
-                    {isJuizMode ? 'Visualizar e Salvar' : 'Gerar Documento'}
+                    {isDiretorMode ? 'Visualizar e Salvar' : 'Gerar Documento'}
                   </button>
                 </div>
               </div>
 
               <div className="space-y-8">
-                {isJuizMode && (
-                  <div className="bg-amber-900/30 p-5 rounded-lg border border-amber-700/50 shadow-lg shadow-amber-900/20 space-y-4">
-                    <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider border-b border-amber-700/50 pb-2">Área Exclusiva do Juiz</h3>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-medium text-amber-200 mb-1">Status da Solicitação</label>
-                        <select 
-                          name="statusMandado" 
-                          value={formData.statusMandado || 'Aprovado'} 
-                          onChange={handleChange} 
-                          disabled={isSignedMode}
-                          className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all ${isSignedMode ? 'opacity-70 cursor-not-allowed' : ''}`}
-                        >
-                          <option value="Aprovado">Aprovado</option>
-                          <option value="Aprovado com Restrições">Aprovado com Restrições</option>
-                          <option value="Negado">Negado</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-amber-200 mb-1">Assinatura do Juiz (Digite seu nome)</label>
-                        <input 
-                          type="text" 
-                          name="juizAssinatura" 
-                          value={formData.juizAssinatura} 
-                          onChange={handleChange} 
-                          placeholder="Ex: Juiz Federal Harvey Specter" 
-                          readOnly={isSignedMode}
-                          className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-signature text-2xl ${isSignedMode ? 'opacity-70 cursor-not-allowed' : ''}`} 
-                        />
-                      </div>
-                    </div>
-
+                {isDiretorMode && (
+                  <div className="bg-amber-900/30 p-5 rounded-lg border border-amber-700/50 shadow-lg shadow-amber-900/20">
+                    <h3 className="text-sm font-bold text-amber-400 mb-4 uppercase tracking-wider border-b border-amber-700/50 pb-2">Área Exclusiva do Diretor</h3>
                     <div>
-                      <label className="block text-xs font-medium text-amber-200 mb-1">Parecer / Observações do Juiz</label>
-                      <textarea 
-                        name="parecerJuiz" 
-                        value={formData.parecerJuiz || ''} 
+                      <label className="block text-xs font-medium text-amber-200 mb-1">Assinatura do Diretor (Digite seu nome)</label>
+                      <input 
+                        type="text" 
+                        name="diretorAssinatura" 
+                        value={formData.diretorAssinatura} 
                         onChange={handleChange} 
-                        rows={4} 
-                        placeholder="Adicione informações, restrições ou justificativas para a decisão..." 
+                        placeholder="Ex: Diretor FIB" 
                         readOnly={isSignedMode}
-                        className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all resize-y ${isSignedMode ? 'opacity-70 cursor-not-allowed' : ''}`} 
+                        className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-signature text-2xl ${isSignedMode ? 'opacity-70 cursor-not-allowed' : ''}`} 
                       />
                     </div>
                   </div>
@@ -297,97 +238,96 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
 
                 {/* Section 1 */}
                 <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">1. Requerente</h3>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">Informações Gerais</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Directive No.</label>
+                      <input type="text" name="directiveNo" value={formData.directiveNo} onChange={handleChange} placeholder="Ex: DIR-2026-001" className="form-input" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Issue Date</label>
+                      <input type="date" name="issueDate" value={formData.issueDate} onChange={handleChange} className="form-input" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Agent</label>
+                      <input type="text" name="agentName" value={formData.agentName} onChange={handleChange} placeholder="Ex: Agente Responsável" className="form-input" />
+                    </div>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Nome do Agente</label>
-                      <input type="text" name="requerenteNome" value={formData.requerenteNome} onChange={handleChange} placeholder="Ex: John Smith" className="form-input" />
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Nome da Operação / Organização</label>
+                      <input type="text" name="operationName" value={formData.operationName} onChange={handleChange} placeholder="Ex: Operação Valquíria" className="form-input" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Badge</label>
-                      <input type="text" name="requerenteBadge" value={formData.requerenteBadge} onChange={handleChange} placeholder="Ex: 123" className="form-input" />
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Investigation Date (Período)</label>
+                      <input type="text" name="investigationDate" value={formData.investigationDate} onChange={handleChange} placeholder="Ex: 01/01/2026 a 01/04/2026" className="form-input" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Rank</label>
-                      <input type="text" name="requerenteRank" value={formData.requerenteRank} onChange={handleChange} placeholder="Ex: Special Agent" className="form-input" />
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Classification</label>
+                      <select name="classification" value={formData.classification} onChange={handleChange} className="form-input">
+                        <option>PUBLIC</option>
+                        <option>INTERNAL USE ONLY</option>
+                        <option>CONFIDENTIAL</option>
+                        <option>SECRET</option>
+                        <option>TOP SECRET</option>
+                      </select>
                     </div>
                   </div>
                 </div>
 
                 {/* Section 2 */}
                 <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">2. Informações do Mandado</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Directive No. (Nome do Documento)</label>
-                      <input type="text" name="directiveNo" value={formData.directiveNo} onChange={handleChange} placeholder="Ex: MD-2023-001" className="form-input" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Nome da Operação</label>
-                      <input type="text" name="nomeOperacao" value={formData.nomeOperacao} onChange={handleChange} placeholder="Ex: Operação Valquíria" className="form-input" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Tipo de Mandado</label>
-                      <select name="tipoMandado" value={formData.tipoMandado} onChange={handleChange} className="form-input">
-                        <option>Busca e Apreensão</option>
-                        <option>Prisão</option>
-                        <option>Confisco de Bens</option>
-                        <option>Quebra de Sigilo</option>
-                        <option>Vigilância</option>
-                        <option>Outros</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Nº dos Incidentes</label>
-                      <input type="text" name="incidentes" value={formData.incidentes} onChange={handleChange} placeholder="Ex: INC-992" className="form-input" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Nº dos Relatórios</label>
-                      <input type="text" name="relatorios" value={formData.relatorios} onChange={handleChange} placeholder="Ex: REL-401" className="form-input" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Data da Solicitação</label>
-                      <input type="date" name="dataSolicitacao" value={formData.dataSolicitacao} onChange={handleChange} className="form-input" />
-                    </div>
-                  </div>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">1. Objetivo da Investigação</h3>
+                  <textarea name="objetivo" value={formData.objetivo} onChange={handleChange} rows={3} placeholder="Definir de forma clara o propósito da investigação..." className="form-input resize-y" />
                 </div>
 
                 {/* Section 3 */}
                 <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">3. Base Legal e Causa Provável</h3>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Finalidade do Mandado</label>
-                      <input type="text" name="finalidade" value={formData.finalidade} onChange={handleChange} placeholder="Ex: Apreensão de narcóticos e armas ilegais" className="form-input" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Resumo dos Fatos</label>
-                      <textarea name="resumoFatos" value={formData.resumoFatos} onChange={handleChange} rows={5} placeholder="Descrição objetiva dos eventos, provas materiais, testemunhais..." className="form-input resize-y" />
-                    </div>
-                  </div>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">2. Organização Investigada</h3>
+                  <textarea name="organizacao" value={formData.organizacao} onChange={handleChange} rows={3} placeholder="Detalhamento do grupo investigado..." className="form-input resize-y" />
                 </div>
 
                 {/* Section 4 */}
                 <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">4. Solicitação Específica</h3>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Locais de Busca (Veículos e Propriedades)</label>
-                      <textarea name="locaisBusca" value={formData.locaisBusca} onChange={handleChange} rows={3} placeholder="Ex: Residência na Vinewood Hills, Placa ABC-1234" className="form-input resize-y" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Itens a Apreender</label>
-                      <textarea name="itensApreensao" value={formData.itensApreensao} onChange={handleChange} rows={3} placeholder="Ex: Armas de fogo não registradas, dinheiro em espécie" className="form-input resize-y" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Outras Medidas Necessárias</label>
-                      <textarea name="outrasMedidas" value={formData.outrasMedidas} onChange={handleChange} rows={2} placeholder="Ex: Bloqueio de contas bancárias" className="form-input resize-y" />
-                    </div>
-                  </div>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">3. Histórico de Ocorrências</h3>
+                  <textarea name="historico" value={formData.historico} onChange={handleChange} rows={4} placeholder="Registro cronológico de todas as ocorrências..." className="form-input resize-y" />
                 </div>
 
+                {/* Section 5 */}
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">4. Análise de Padrão Criminal</h3>
+                  <textarea name="analise" value={formData.analise} onChange={handleChange} rows={4} placeholder="Seção analítica onde irá interpretar os dados..." className="form-input resize-y" />
+                </div>
+
+                {/* Section 6 */}
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">5. Inteligência Coletada</h3>
+                  <textarea name="inteligencia" value={formData.inteligencia} onChange={handleChange} rows={4} placeholder="Resumo dos métodos e informações obtidas..." className="form-input resize-y" />
+                </div>
+
+                {/* Section 7 */}
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">6. Fundamentação Legal</h3>
+                  <textarea name="fundamentacao" value={formData.fundamentacao} onChange={handleChange} rows={3} placeholder="Base legal que sustenta a investigação..." className="form-input resize-y" />
+                </div>
+
+                {/* Section 8 */}
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">7. Medidas Operacionais Ativas</h3>
+                  <textarea name="medidas" value={formData.medidas} onChange={handleChange} rows={3} placeholder="Lista das ações já autorizadas..." className="form-input resize-y" />
+                </div>
+
+                {/* Section 9 */}
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">8. Conclusão</h3>
+                  <textarea name="conclusao" value={formData.conclusao} onChange={handleChange} rows={3} placeholder="Síntese final da investigação..." className="form-input resize-y" />
+                </div>
+
+                {/* Section 10 */}
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">Assinatura do Agente</h3>
+                  <input type="text" name="agenteAssinatura" value={formData.agenteAssinatura} onChange={handleChange} placeholder="Ex: Agente John Doe" className="w-full bg-slate-950 border border-slate-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-signature text-2xl" />
+                </div>
               </div>
             </div>
           </div>
@@ -465,7 +405,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
 }
 
 // --- Document Preview Component ---
-function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: () => void }) {
+function DocumentPreview({ formData, onBack }: { formData: RelatorioData, onBack: () => void }) {
   const coverRef = useRef<HTMLDivElement>(null);
   const docRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -530,7 +470,7 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
     if (!coverRef.current) return;
     setIsExporting(true);
     try {
-      await exportSingleImage(coverRef.current, `1_Capa_${formData.directiveNo || 'Mandado'}.png`, '#c29b6c');
+      await exportSingleImage(coverRef.current, `1_Capa_${formData.directiveNo || 'Relatorio'}.png`, '#c29b6c');
     } catch (err) {
       console.error('Failed to export cover', err);
       alert(`Erro ao salvar a capa: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
@@ -546,7 +486,7 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
       const pages = docRef.current.querySelectorAll('.document-page');
       for (let i = 0; i < pages.length; i++) {
         const pageEl = pages[i] as HTMLElement;
-        await exportSingleImage(pageEl, `${i + 2}_Pagina_${i + 1}_${formData.directiveNo || 'Mandado'}.png`);
+        await exportSingleImage(pageEl, `${i + 2}_Pagina_${i + 1}_${formData.directiveNo || 'Relatorio'}.png`);
         // Small delay to prevent browser from blocking multiple downloads
         await new Promise(res => setTimeout(res, 500));
       }
@@ -571,7 +511,7 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
 
   blocks.push({
     id: 'header',
-    height: 220,
+    height: 280,
     render: () => (
       <div key="header" className="flex flex-col mb-8">
         <div className="flex justify-between items-start border-b-2 border-black/80 pb-6 mb-6">
@@ -581,155 +521,181 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
             <div className="w-24 h-24 bg-black/10 rounded-full" />
           )}
           <div className="text-right">
-            <h2 className="text-xl font-bold font-serif tracking-wider text-black/90">DEPARTMENT OF JUSTICE</h2>
-            <h3 className="text-lg font-bold font-serif tracking-wide text-black/80">FEDERAL INVESTIGATION BUREAU</h3>
+            <h2 className="text-xl font-bold font-serif tracking-wider text-black/90">FEDERAL INVESTIGATION BUREAU</h2>
+            <h3 className="text-lg font-bold font-serif tracking-wide text-black/80">INVESTIGATION REPORT</h3>
+            <div className="mt-4 text-sm">
+              <p><span className="font-bold">Directive No.:</span> {formData.directiveNo}</p>
+              <p><span className="font-bold">Issue Date:</span> {formData.issueDate}</p>
+              <p><span className="font-bold">Agent:</span> {formData.agentName}</p>
+            </div>
           </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold tracking-widest text-black/90">SOLICITAÇÃO DE MANDADO JUDICIAL</h1>
-          <p className="font-bold mt-2 text-black/80">Directive No.: <span className="font-normal">{formData.directiveNo || '[NÃO INFORMADO]'}</span></p>
+        <div className="border-b-2 border-black/80 pb-4">
+          <h1 className="text-xl font-bold tracking-widest text-black/90 uppercase">{formData.operationName || '[NOME DA OPERAÇÃO / ORGANIZAÇÃO]'}</h1>
+          <p className="font-bold mt-2 text-black/80 text-sm">Directive No.: <span className="font-normal">{formData.directiveNo}</span> / Issue Date: <span className="font-normal">{formData.issueDate}</span> / Investigation Date: <span className="font-normal">{formData.investigationDate}</span></p>
+          <p className="font-bold mt-1 text-black/80 text-sm">Classification/Classificação: <span className="font-normal">{formData.classification}</span></p>
         </div>
       </div>
     )
   });
 
   blocks.push({
-    id: 'requerente',
-    height: 100,
+    id: 'objetivo',
+    height: 80 + Math.ceil((formData.objetivo?.length || 0) / 80) * 20,
     render: () => (
-      <section key="requerente" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">1. REQUERENTE</h3>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <p><span className="font-bold">Nome:</span> {formData.requerenteNome} {formData.requerenteBadge ? `- ${formData.requerenteBadge}` : ''}</p>
-          <p><span className="font-bold">Rank:</span> {formData.requerenteRank}</p>
-        </div>
+      <section key="objetivo" className="mb-6">
+        <h3 className="font-bold text-lg mb-2">1. OBJETIVO DA INVESTIGAÇÃO</h3>
+        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.objetivo}</p>
       </section>
     )
   });
 
   blocks.push({
-    id: 'informacoes',
-    height: 140,
+    id: 'organizacao',
+    height: 80 + Math.ceil((formData.organizacao?.length || 0) / 80) * 20,
     render: () => (
-      <section key="informacoes" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">2. INFORMAÇÕES DO MANDADO</h3>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <p><span className="font-bold">Incidentes:</span> {formData.incidentes}</p>
-          <p><span className="font-bold">Relatórios:</span> {formData.relatorios}</p>
-          <p><span className="font-bold">Data:</span> {formData.dataSolicitacao}</p>
-          <p><span className="font-bold">Tipo:</span> {formData.tipoMandado}</p>
-        </div>
+      <section key="organizacao" className="mb-6">
+        <h3 className="font-bold text-lg mb-2">2. ORGANIZAÇÃO INVESTIGADA</h3>
+        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.organizacao}</p>
       </section>
     )
   });
 
   blocks.push({
-    id: 'base_legal',
-    height: 120 + Math.ceil((formData.resumoFatos?.length || 0) / 80) * 20,
+    id: 'historico',
+    height: 80 + Math.ceil((formData.historico?.length || 0) / 80) * 20,
     render: () => (
-      <section key="base_legal" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">3. BASE LEGAL E CAUSA PROVÁVEL</h3>
-        <p className="mb-3 text-sm">Com base nos fatos e nas evidências listadas abaixo, solicita-se a expedição de mandado para <strong>{formData.finalidade || '[finalidade do mandado]'}</strong>.</p>
-        <p className="font-bold text-sm">Resumo dos Fatos:</p>
-        <p className="whitespace-pre-wrap mt-1 text-sm text-justify leading-relaxed">{formData.resumoFatos || '[Descrição objetiva dos eventos...]'}</p>
+      <section key="historico" className="mb-6">
+        <h3 className="font-bold text-lg mb-2">3. HISTÓRICO DE OCORRÊNCIAS</h3>
+        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.historico}</p>
       </section>
     )
   });
 
   blocks.push({
-    id: 'solicitacao',
-    height: 180 + Math.ceil((formData.locaisBusca?.length || 0) / 80) * 20 + Math.ceil((formData.itensApreensao?.length || 0) / 80) * 20 + Math.ceil((formData.outrasMedidas?.length || 0) / 80) * 20,
+    id: 'analise',
+    height: 80 + Math.ceil((formData.analise?.length || 0) / 80) * 20,
     render: () => (
-      <section key="solicitacao" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">4. SOLICITAÇÃO ESPECÍFICA</h3>
-        <p className="mb-2 text-sm">O requerente solicita autorização para:</p>
-        
-        <p className="font-bold mt-3 text-sm">Realizar busca e apreensão no(s) seguinte(s) local(is):</p>
-        <p className="whitespace-pre-wrap ml-4 text-sm">{formData.locaisBusca || '[Listar Veículos e Propriedades]'}</p>
+      <section key="analise" className="mb-6">
+        <h3 className="font-bold text-lg mb-2">4. ANÁLISE DE PADRÃO CRIMINAL</h3>
+        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.analise}</p>
+      </section>
+    )
+  });
 
-        <p className="font-bold mt-3 text-sm">Apreender os seguintes itens, caso encontrados:</p>
-        <p className="whitespace-pre-wrap ml-4 text-sm">{formData.itensApreensao || '[Listagem de itens]'}</p>
+  blocks.push({
+    id: 'inteligencia',
+    height: 80 + Math.ceil((formData.inteligencia?.length || 0) / 80) * 20,
+    render: () => (
+      <section key="inteligencia" className="mb-6">
+        <h3 className="font-bold text-lg mb-2">5. INTELIGÊNCIA COLETADA</h3>
+        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.inteligencia}</p>
+      </section>
+    )
+  });
 
-        <p className="font-bold mt-3 text-sm">Outras medidas necessárias:</p>
-        <p className="whitespace-pre-wrap ml-4 text-sm">{formData.outrasMedidas || '[Especificar, se aplicável]'}</p>
+  blocks.push({
+    id: 'fundamentacao',
+    height: 80 + Math.ceil((formData.fundamentacao?.length || 0) / 80) * 20,
+    render: () => (
+      <section key="fundamentacao" className="mb-6">
+        <h3 className="font-bold text-lg mb-2">6. FUNDAMENTAÇÃO LEGAL</h3>
+        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.fundamentacao}</p>
+      </section>
+    )
+  });
+
+  blocks.push({
+    id: 'medidas',
+    height: 80 + Math.ceil((formData.medidas?.length || 0) / 80) * 20,
+    render: () => (
+      <section key="medidas" className="mb-6">
+        <h3 className="font-bold text-lg mb-2">7. MEDIDAS OPERACIONAIS ATIVAS</h3>
+        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.medidas}</p>
+      </section>
+    )
+  });
+
+  blocks.push({
+    id: 'conclusao',
+    height: 80 + Math.ceil((formData.conclusao?.length || 0) / 80) * 20,
+    render: () => (
+      <section key="conclusao" className="mb-6">
+        <h3 className="font-bold text-lg mb-2">8. CONCLUSÃO</h3>
+        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.conclusao}</p>
       </section>
     )
   });
 
   blocks.push({
     id: 'declaracao',
-    height: 120,
+    height: 140,
     render: () => (
       <section key="declaracao" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">5. DECLARAÇÃO DO REQUERENTE</h3>
-        <p className="text-justify text-sm leading-relaxed">
-          Declaro, sob as penas da lei, que as informações contidas nesta solicitação são verídicas e fundamentadas em
-          evidências substanciais e concretas obtidas durante a investigação. Estas evidências justificam plenamente a
-          necessidade da expedição do presente mandado, com a finalidade de assegurar a continuidade das apurações e
-          a devida aplicação da lei.
+        <h3 className="font-bold text-lg mb-2">9. DECLARAÇÃO FINAL</h3>
+        <p className="text-justify text-sm leading-relaxed italic">
+          "Declaro, sob responsabilidade funcional e na observância dos princípios constitucionais de legalidade, devido
+          processo legal e proteção de direitos individuais, que as informações constantes neste relatório correspondem
+          fielmente aos fatos apurados durante o período indicado, estando em conformidade com as diretrizes
+          operacionais da Divisão de Inteligência e Fiscalização de Investigações da Federal Investigation Bureau, bem
+          como com os procedimentos previstos no Standard Operating Procedures da Agência e nas normas legais
+          aplicáveis aos procedimentos investigativos federais."
         </p>
+        <p className="mt-4 text-sm">Data: {new Date().toLocaleDateString('pt-BR')}</p>
       </section>
     )
   });
-
-  if (formData.parecerJuiz || formData.statusMandado) {
-    blocks.push({
-      id: 'parecer_juiz',
-      height: 100 + Math.ceil((formData.parecerJuiz?.length || 0) / 80) * 20,
-      render: () => (
-        <section key="parecer_juiz" className="mb-6 bg-gray-100/50 p-4 border border-gray-300">
-          <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">DECISÃO JUDICIAL</h3>
-          <p className="mb-2 text-sm"><span className="font-bold">Status:</span> {formData.statusMandado || 'Aprovado'}</p>
-          {formData.parecerJuiz && (
-            <>
-              <p className="font-bold mt-2 text-sm">Parecer / Observações:</p>
-              <p className="whitespace-pre-wrap ml-4 text-sm text-justify leading-relaxed">{formData.parecerJuiz}</p>
-            </>
-          )}
-        </section>
-      )
-    });
-  }
 
   blocks.push({
     id: 'assinaturas',
     height: 200,
     render: () => (
       <div key="assinaturas" className="mt-auto pt-8">
-        <h3 className="font-bold text-lg mb-12">6. ASSINATURA</h3>
         <div className="flex justify-between px-8">
           <div className="text-center w-64 relative">
-            {formData.requerenteNome && (
+            {formData.agenteAssinatura && (
               <div className="absolute bottom-6 w-full text-center pointer-events-none">
                 <span className="font-signature text-4xl text-[#0000a0] -rotate-2 inline-block opacity-90">
-                  {formData.requerenteNome}
+                  {formData.agenteAssinatura}
                 </span>
               </div>
             )}
             <div className="border-b border-black mb-2"></div>
-            <p className="text-sm font-bold">Requerente</p>
+            <p className="text-sm font-bold">Assinatura do Agente</p>
           </div>
           <div className="text-center w-64 relative">
-            {formData.juizAssinatura && (
+            {formData.diretorAssinatura && (
               <div className="absolute bottom-6 w-full text-center pointer-events-none">
                 <span className="font-signature text-5xl text-black -rotate-2 inline-block opacity-90">
-                  {formData.juizAssinatura}
+                  {formData.diretorAssinatura}
                 </span>
               </div>
             )}
             <div className="border-b border-black mb-2"></div>
-            <p className="text-sm font-bold">Juiz</p>
+            <p className="text-sm font-bold">Assinatura Diretoria</p>
           </div>
         </div>
       </div>
     )
   });
 
-  const pages: Block[][] = [
-    blocks.filter(b => ['header', 'requerente', 'informacoes', 'base_legal'].includes(b.id)),
-    blocks.filter(b => ['solicitacao'].includes(b.id)),
-    blocks.filter(b => ['declaracao', 'parecer_juiz', 'assinaturas'].includes(b.id))
-  ];
+  const pages: Block[][] = [];
+  let currentPage: Block[] = [];
+  let currentHeight = 0;
+
+  blocks.forEach(block => {
+    if (currentHeight + block.height > A4_CONTENT_HEIGHT && currentPage.length > 0) {
+      pages.push(currentPage);
+      currentPage = [block];
+      currentHeight = block.height;
+    } else {
+      currentPage.push(block);
+      currentHeight += block.height;
+    }
+  });
+  if (currentPage.length > 0) {
+    pages.push(currentPage);
+  }
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950">
@@ -787,32 +753,32 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
               <div className="w-full h-0.5 bg-black/40 mb-16"></div>
 
               <h2 className="text-3xl font-bold text-black/80 tracking-widest text-center mb-8 uppercase">
-                {formData.tipoMandado || 'MANDADO JUDICIAL'}
+                {formData.classification || 'RELATÓRIO DE INVESTIGAÇÃO'}
               </h2>
               
               <div className="w-full max-w-2xl space-y-6">
                 <div className="flex items-end gap-4">
-                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">File Number:</span>
+                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Directive No.:</span>
                   <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">
                     {formData.directiveNo}
                   </div>
                 </div>
                 <div className="flex items-end gap-4">
-                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">File Title:</span>
+                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Operation:</span>
                   <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2 truncate">
-                    {formData.nomeOperacao || '[NOME DA OPERAÇÃO]'}
+                    {formData.operationName || '[NOME DA OPERAÇÃO]'}
                   </div>
                 </div>
                 <div className="flex items-end gap-4">
-                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Start Date:</span>
+                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Issue Date:</span>
                   <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">
-                    {formData.dataSolicitacao}
+                    {formData.issueDate}
                   </div>
                 </div>
                 <div className="flex items-end gap-4">
-                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">{formData.requerenteRank || 'Special Agent'}:</span>
+                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Agent:</span>
                   <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">
-                    {formData.requerenteNome}
+                    {formData.agentName}
                   </div>
                 </div>
               </div>

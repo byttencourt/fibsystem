@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Power, FileText } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import { MandatoWindow } from './Mandato';
+import { RelatorioWindow } from './Relatorio';
 
 // --- Types ---
 type WindowState = {
@@ -16,7 +17,8 @@ type WindowState = {
 export default function App() {
   const [time, setTime] = useState(new Date());
   const [windows, setWindows] = useState<WindowState[]>([
-    { id: 'mandato', title: 'Sistema de Mandados - F.I.B', isOpen: false, isMinimized: false, isMaximized: false }
+    { id: 'mandato', title: 'Sistema de Mandados - F.I.B', isOpen: false, isMinimized: false, isMaximized: false },
+    { id: 'relatorio', title: 'Relatórios de Investigação - F.I.B', isOpen: false, isMinimized: false, isMaximized: false }
   ]);
 
   useEffect(() => {
@@ -40,8 +42,6 @@ export default function App() {
     setWindows(windows.map(w => w.id === id ? { ...w, isMaximized: !w.isMaximized } : w));
   };
 
-  const mandatoWindow = windows.find(w => w.id === 'mandato');
-
   return (
     <div className="h-screen w-screen overflow-hidden bg-black text-white font-sans flex flex-col relative selection:bg-blue-500/30">
       {/* Desktop Background */}
@@ -59,17 +59,31 @@ export default function App() {
           label="Mandados F.I.B" 
           onClick={() => openWindow('mandato')} 
         />
+        <DesktopIcon 
+          iconUrl="https://kappa.lol/TkFgCM" 
+          label="Relatórios F.I.B" 
+          onClick={() => openWindow('relatorio')} 
+        />
       </div>
 
       {/* Windows */}
       <AnimatePresence>
-        {mandatoWindow?.isOpen && !mandatoWindow.isMinimized && (
+        {windows.find(w => w.id === 'mandato')?.isOpen && !windows.find(w => w.id === 'mandato')?.isMinimized && (
           <MandatoWindow 
             key="mandato"
-            isMaximized={mandatoWindow.isMaximized}
+            isMaximized={windows.find(w => w.id === 'mandato')?.isMaximized || false}
             onClose={() => closeWindow('mandato')} 
             onMinimize={() => toggleMinimize('mandato')} 
             onMaximize={() => toggleMaximize('mandato')}
+          />
+        )}
+        {windows.find(w => w.id === 'relatorio')?.isOpen && !windows.find(w => w.id === 'relatorio')?.isMinimized && (
+          <RelatorioWindow 
+            key="relatorio"
+            isMaximized={windows.find(w => w.id === 'relatorio')?.isMaximized || false}
+            onClose={() => closeWindow('relatorio')} 
+            onMinimize={() => toggleMinimize('relatorio')} 
+            onMaximize={() => toggleMaximize('relatorio')}
           />
         )}
       </AnimatePresence>
