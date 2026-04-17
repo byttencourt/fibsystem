@@ -1,15 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
-  ChevronLeft, Download, Image as ImageIcon, Type, Square, Save, 
+  ChevronLeft, Download, Image as ImageIcon, Type, Save, Square,
   Trash2, Check, Copy, FileText, Maximize2, Minimize2, X, PlusCircle, Trash,
-  Circle, Minus, ArrowDownToLine
+  Circle, Minus, ArrowDownToLine, MoveUpRight, PenTool, Highlighter
 } from 'lucide-react';
 import { toBlob } from 'html-to-image';
 import { Rnd } from 'react-rnd';
 import { v4 as uuidv4 } from 'uuid';
 
-export type ElementType = 'text' | 'image' | 'stamp' | 'circle' | 'rect' | 'cross';
+export type ElementType = 'text' | 'image' | 'stamp' | 'circle' | 'arrow' | 'cross' | 'drawing' | 'redact';
 
 export interface ReportElement {
   id: string;
@@ -23,6 +23,8 @@ export interface ReportElement {
   textColor?: string;
   fontWeight?: string;
   imageStyle?: 'normal' | 'polaroid';
+  angle?: number;
+  points?: {x: number, y: number}[];
 }
 
 export interface EditorPage {
@@ -121,40 +123,82 @@ function DraggableElement({
       style={{ zIndex: selected ? 10 : 1 }}
     >
       {selected && !isEditing && !readOnly && (
-        <>
-          <button 
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            className="absolute -top-8 right-0 bg-red-600 text-white p-1.5 rounded-full shadow hover:bg-red-500"
-          >
-            <Trash2 className="w-3 h-3" />
-          </button>
-          {onMoveToNextPage && (
-            <button 
-              onClick={(e) => { e.stopPropagation(); onMoveToNextPage(); }}
-              className="absolute -top-8 right-10 bg-blue-600 text-white p-1.5 rounded-full shadow hover:bg-blue-500"
-              title="Mover para a Próxima Página (Resolve sobreposição)"
-            >
-              <ArrowDownToLine className="w-3 h-3" />
-            </button>
-          )}
-        </>
-      )}
+        <div className="absolute -top-12 left-0 bg-slate-800 text-white p-1 rounded shadow flex gap-1 items-center z-50 whitespace-nowrap">
+           {el.type === 'image' && (
+             <>
+               <button onClick={() => onChange({ imageStyle: 'normal' })} className={`px-2 py-1 text-xs rounded ${(!el.imageStyle || el.imageStyle === 'normal') ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>Padrão</button>
+               <button onClick={() => onChange({ imageStyle: 'polaroid' })} className={`px-2 py-1 text-xs rounded ${el.imageStyle === 'polaroid' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>Polaroid</button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+             </>
+           )}
 
-      {selected && !isEditing && !readOnly && el.type === 'image' && (
-        <div className="absolute -top-10 left-0 bg-slate-800 text-white p-1 rounded shadow flex gap-1 items-center z-50">
-           <button onClick={() => onChange({ imageStyle: 'normal' })} className={`px-2 py-1 text-xs rounded ${(!el.imageStyle || el.imageStyle === 'normal') ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>Padrão</button>
-           <button onClick={() => onChange({ imageStyle: 'polaroid' })} className={`px-2 py-1 text-xs rounded ${el.imageStyle === 'polaroid' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>Polaroid</button>
-        </div>
-      )}
+           {el.type === 'text' && (
+             <>
+               <button onClick={() => onChange({ fontWeight: el.fontWeight === 'bold' ? 'normal' : 'bold' })} className={`px-2 py-1 text-xs rounded ${el.fontWeight === 'bold' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>B</button>
+               <button onClick={() => onChange({ fontSize: (el.fontSize || 14) - 2 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700">A-</button>
+               <button onClick={() => onChange({ fontSize: (el.fontSize || 14) + 2 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700">A+</button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+               <button onClick={() => onChange({ textColor: '#dc2626' })} className="w-4 h-4 rounded-full bg-red-600 hover:scale-110"></button>
+               <button onClick={() => onChange({ textColor: '#000000' })} className="w-4 h-4 rounded-full bg-black border hover:scale-110"></button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+             </>
+           )}
 
-      {selected && !isEditing && !readOnly && el.type === 'text' && (
-        <div className="absolute -top-10 left-0 bg-slate-800 text-white p-1 rounded shadow flex gap-1 items-center z-50">
-           <button onClick={() => onChange({ fontWeight: el.fontWeight === 'bold' ? 'normal' : 'bold' })} className={`px-2 py-1 text-xs rounded ${el.fontWeight === 'bold' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>B</button>
-           <button onClick={() => onChange({ fontSize: (el.fontSize || 14) - 2 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700">A-</button>
-           <button onClick={() => onChange({ fontSize: (el.fontSize || 14) + 2 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700">A+</button>
-           <div className="h-4 w-px bg-slate-600 mx-1"></div>
-           <button onClick={() => onChange({ textColor: '#ef4444' })} className="w-4 h-4 rounded-full bg-red-500 hover:scale-110"></button>
-           <button onClick={() => onChange({ textColor: '#000000' })} className="w-4 h-4 rounded-full bg-black border hover:scale-110"></button>
+           {['circle', 'arrow', 'cross', 'drawing'].includes(el.type) && (
+             <>
+               <button onClick={() => onChange({ textColor: '#ef4444' })} className="w-4 h-4 rounded-full bg-red-500 hover:scale-110 border border-slate-600"></button>
+               <button onClick={() => onChange({ textColor: '#000000' })} className="w-4 h-4 rounded-full bg-black border hover:scale-110 border border-slate-600"></button>
+               <button onClick={() => onChange({ textColor: '#3b82f6' })} className="w-4 h-4 rounded-full bg-blue-500 hover:scale-110 border border-slate-600"></button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+               <button onClick={() => onChange({ angle: (el.angle ?? 0) - 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Esquerda">↺</button>
+               <button onClick={() => onChange({ angle: (el.angle ?? 0) + 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Direita">↻</button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+             </>
+           )}
+
+           {el.type === 'redact' && (
+             <>
+               <button onClick={() => onChange({ textColor: '#000000' })} className="w-4 h-4 rounded-full bg-black hover:scale-110 border border-slate-600" title="Censura Preta"></button>
+               <button onClick={() => onChange({ textColor: '#fef08a' })} className="w-4 h-4 rounded-full bg-yellow-300 hover:scale-110 border border-slate-600" title="Marca Texto Amarelo"></button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+               <button onClick={() => onChange({ angle: (el.angle ?? 0) - 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Esquerda">↺</button>
+               <button onClick={() => onChange({ angle: (el.angle ?? 0) + 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Direita">↻</button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+             </>
+           )}
+
+           {el.type === 'stamp' && (
+             <>
+               <button onClick={() => onChange({ content: 'SECRET', textColor: '#dc2626', width: 220, height: 60 })} className={`px-2 py-1 text-xs rounded ${el.content === 'SECRET' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>SECRET</button>
+               <button onClick={() => onChange({ content: 'TOP SECRET', textColor: '#dc2626', width: 300, height: 60 })} className={`px-2 py-1 text-xs rounded ${el.content === 'TOP SECRET' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>TOP SECRET</button>
+               <button onClick={() => onChange({ content: 'CONFIDENTIAL', textColor: '#dc2626', width: 300, height: 60 })} className={`px-2 py-1 text-xs rounded ${el.content === 'CONFIDENTIAL' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>CONFIDENTIAL</button>
+               <button onClick={() => onChange({ content: 'INTERNAL USE', textColor: '#000000', width: 300, height: 60 })} className={`px-2 py-1 text-xs rounded ${el.content === 'INTERNAL USE' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>INTERNAL USE</button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+               <button onClick={() => onChange({ fontSize: (el.fontSize || 32) - 4 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Diminuir">A-</button>
+               <button onClick={() => onChange({ fontSize: (el.fontSize || 32) + 4 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Aumentar">A+</button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+               <button onClick={() => onChange({ angle: (el.angle ?? -15) - 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Esquerda">↺</button>
+               <button onClick={() => onChange({ angle: (el.angle ?? -15) + 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Direita">↻</button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+             </>
+           )}
+
+           <button 
+             onClick={(e) => { e.stopPropagation(); onDelete(); }}
+             className="px-2 py-1 rounded hover:bg-red-600 text-red-400 hover:text-white transition-colors"
+             title="Excluir Elemento"
+           >
+             <Trash2 className="w-3.5 h-3.5" />
+           </button>
+           {onMoveToNextPage && (
+             <button 
+               onClick={(e) => { e.stopPropagation(); onMoveToNextPage(); }}
+               className="px-2 py-1 rounded hover:bg-blue-600 text-blue-400 hover:text-white transition-colors"
+               title="Mover para a Próxima Página"
+             >
+               <ArrowDownToLine className="w-3.5 h-3.5" />
+             </button>
+           )}
         </div>
       )}
 
@@ -209,19 +253,86 @@ function DraggableElement({
             <img src={el.content} className="w-full h-full object-cover pointer-events-none shadow" alt="" />
           )
         ) : el.type === 'circle' ? (
-          <div className="w-full h-full border-4 border-red-500 rounded-full bg-transparent pointer-events-none shadow-sm" style={{ borderColor: el.textColor || '#ef4444' }}></div>
-        ) : el.type === 'rect' ? (
-          <div className="w-full h-full border-4 border-red-500 bg-transparent pointer-events-none shadow-sm" style={{ borderColor: el.textColor || '#ef4444' }}></div>
+          <div className="w-full h-full pointer-events-none" style={{ transform: `rotate(${el.angle ?? 0}deg)` }}>
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible drop-shadow-sm opacity-90">
+              <path 
+                vectorEffect="non-scaling-stroke" 
+                d="M 80 25 C 60 5, 20 10, 15 45 C 10 80, 40 95, 75 85 C 100 75, 95 30, 75 15 C 60 5, 45 15, 40 25" 
+                fill="none" 
+                stroke={el.textColor || '#ef4444'} 
+                strokeWidth="4" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+              />
+            </svg>
+          </div>
+        ) : el.type === 'arrow' ? (
+          <div className="w-full h-full pointer-events-none" style={{ transform: `rotate(${el.angle ?? 0}deg)` }}>
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible drop-shadow-[0_1px_1px_rgba(0,0,0,0.1)]">
+              <path d="M10,50 Q40,40 90,50 M70,30 Q85,45 90,50 Q80,65 70,70" fill="none" stroke={el.textColor || '#ef4444'} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
         ) : el.type === 'cross' ? (
-          <div className="w-full h-full relative pointer-events-none">
-            <div className="absolute top-1/2 left-0 w-full h-1 bg-red-500 rotate-45 transform -translate-y-1/2" style={{ backgroundColor: el.textColor || '#ef4444' }}></div>
-            <div className="absolute top-1/2 left-0 w-full h-1 bg-red-500 -rotate-45 transform -translate-y-1/2" style={{ backgroundColor: el.textColor || '#ef4444' }}></div>
+          <div className="w-full h-full pointer-events-none" style={{ transform: `rotate(${el.angle ?? 0}deg)` }}>
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible drop-shadow-sm opacity-90">
+              <path 
+                vectorEffect="non-scaling-stroke" 
+                d="M 15 15 Q 50 45, 85 85 M 20 85 Q 55 45, 80 15" 
+                fill="none" 
+                stroke={el.textColor || '#ef4444'} 
+                strokeWidth="4" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+              />
+            </svg>
           </div>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center font-bold font-serif text-red-600 border-4 border-red-600 rotate-[-15deg] opacity-80 pointer-events-none uppercase text-2xl">
-            {el.content}
+        ) : el.type === 'redact' ? (
+          <div 
+            className="w-full h-full pointer-events-none" 
+            style={{ 
+              transform: `rotate(${el.angle ?? 0}deg)`,
+              mixBlendMode: (el.textColor === '#fef08a' || el.textColor === '#ffff00') ? 'multiply' : 'normal',
+              opacity: (el.textColor === '#fef08a' || el.textColor === '#ffff00') ? 0.45 : 0.95
+            }}
+          >
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible drop-shadow-sm">
+              <path 
+                d="M 1 15 Q 15 5 50 12 T 99 8 L 97 88 Q 80 95 50 85 T 2 92 Z" 
+                fill={el.textColor || '#000000'} 
+              />
+            </svg>
           </div>
-        )}
+        ) : el.type === 'drawing' && el.points ? (
+          <div className="w-full h-full pointer-events-none" style={{ transform: `rotate(${el.angle ?? 0}deg)` }}>
+            <svg viewBox={`0 0 ${el.width} ${el.height}`} className="w-full h-full overflow-visible drop-shadow-[0_1px_1px_rgba(0,0,0,0.1)]">
+               <polyline 
+                 points={el.points.map(p => `${p.x},${p.y}`).join(' ')} 
+                 fill="none" 
+                 stroke={el.textColor || '#000000'} 
+                 strokeWidth="3" 
+                 strokeLinecap="round" 
+                 strokeLinejoin="round" 
+               />
+            </svg>
+          </div>
+        ) : el.type === 'stamp' ? (
+          <div className="w-full h-full flex items-center justify-center pointer-events-none" style={{ transform: `rotate(${el.angle ?? -15}deg)` }}>
+            <div 
+              className="inline-flex items-center justify-center font-bold font-serif opacity-80 uppercase"
+              style={{ 
+                color: el.textColor || '#dc2626',
+                borderColor: el.textColor || '#dc2626',
+                borderWidth: '4px',
+                fontSize: el.fontSize || 32,
+                padding: '4px 16px',
+                lineHeight: '1.2',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {el.content || 'CONFIDENTIAL'}
+            </div>
+          </div>
+        ) : null}
       </div>
     </Rnd>
   );
@@ -230,6 +341,7 @@ function DraggableElement({
 export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }: { isMaximized: boolean, onClose: () => void, onMinimize: () => void, onMaximize: () => void }) {
   const [metadata, setMetadata] = useState<RelatorioMetadata>(DEFAULT_METADATA);
   const [pages, setPages] = useState<EditorPage[]>([]);
+  const [coverElements, setCoverElements] = useState<ReportElement[]>([]);
   const [isSignedMode, setIsSignedMode] = useState(false);
   const [isDiretorMode, setIsDiretorMode] = useState(false);
   
@@ -240,6 +352,10 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
   const docRef = useRef<HTMLDivElement>(null);
   const coverRef = useRef<HTMLDivElement>(null);
   const [linkGerado, setLinkGerado] = useState(false);
+  
+  const [drawMode, setDrawMode] = useState(false);
+  const [activeDrawPage, setActiveDrawPage] = useState<string | null>(null);
+  const [currentPathPoints, setCurrentPathPoints] = useState<{x:number, y:number}[]>([]);
 
   useEffect(() => {
     const fetchLocalImage = async () => {
@@ -318,7 +434,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
       content = customContent;
       width = 200;
       height = 200;
-    } else if (type === 'circle' || type === 'rect') {
+    } else if (type === 'circle' || type === 'arrow') {
       content = '';
       width = 150;
       height = 150;
@@ -326,6 +442,10 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
       content = '';
       width = 100;
       height = 100;
+    } else if (type === 'redact') {
+      content = '';
+      width = 240;
+      height = 24;
     }
 
     const newEl: ReportElement = {
@@ -367,6 +487,10 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
   };
 
   const updateElement = (pageId: string, elId: string, updates: Partial<ReportElement>) => {
+    if (pageId === 'cover') {
+      setCoverElements(prev => prev.map(el => el.id === elId ? { ...el, ...updates } : el));
+      return;
+    }
     setPages(prev => prev.map(p => {
       if (p.id === pageId) {
         const oldEl = p.elements.find(e => e.id === elId);
@@ -409,6 +533,11 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
   };
 
   const deleteElement = (pageId: string, elId: string) => {
+    if (pageId === 'cover') {
+      setCoverElements(prev => prev.filter(el => el.id !== elId));
+      setSelectedElement(null);
+      return;
+    }
     setPages(prev => prev.map(p => {
       if (p.id === pageId) {
         return { ...p, elements: p.elements.filter(el => el.id !== elId) };
@@ -416,6 +545,21 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
       return p;
     }));
     setSelectedElement(null);
+  };
+
+  const addCoverElement = (type: ElementType) => {
+    const el: ReportElement = {
+      id: uuidv4(),
+      type,
+      x: 290,
+      y: 800,
+      width: type === 'stamp' ? 300 : 200,
+      height: type === 'stamp' ? 60 : 40,
+      content: type === 'stamp' ? 'CONFIDENTIAL' : '',
+      angle: type === 'stamp' ? -15 : 0,
+      textColor: '#dc2626'
+    };
+    setCoverElements([...coverElements, el]);
   };
 
   const addPage = () => {
@@ -516,6 +660,14 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
         </div>
 
         <div className="flex items-center gap-2">
+          <button 
+            onClick={() => { setDrawMode(!drawMode); setSelectedElement(null); }} 
+            className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-colors font-medium border ${drawMode ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
+          >
+            <PenTool className="w-4 h-4" />
+            {drawMode ? 'Desativar Caneta' : 'Caneta Livre'}
+          </button>
+          
           <button onClick={gerarLink} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors">
              {linkGerado ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4" />}
              {linkGerado ? 'Link Copiado!' : 'Copiar Link / Salvar'}
@@ -535,20 +687,27 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
         <div className="flex flex-col items-center gap-16 pb-32">
           
           {/* COVER PAGE */}
-          <div ref={coverRef} className="relative w-[880px] h-[1200px] shrink-0 flex items-center justify-center overflow-hidden shadow-2xl" style={{ backgroundColor: '#c29b6c' }}>
-             <div className="relative z-10 flex flex-col items-center w-full px-24">
-                {sealBase64 ? (
-                  <img src={sealBase64} alt="FIB Seal" className="w-64 h-64 object-contain mb-16 opacity-90" />
-                ) : (
-                  <div className="w-64 h-64 bg-black/10 rounded-full mb-16" />
-                )}
+          <div className="relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
+             {/* TOOLBAR FOR COVER */}
+             {!isSignedMode && (
+               <div className="absolute -left-16 top-10 flex flex-col gap-2">
+                 <button onClick={() => addCoverElement('stamp')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow" title="Adicionar Carimbo">
+                   <span className="text-xs font-bold font-serif px-1 border-2 border-slate-300 rounded-sm italic">C</span>
+                 </button>
+               </div>
+             )}
+
+             <div ref={coverRef} className="relative w-[880px] h-[1200px] flex items-center justify-center overflow-hidden shadow-2xl" style={{ backgroundColor: '#c29b6c' }}>
+                <div className="relative z-10 flex flex-col items-center w-full px-24">
+                   {sealBase64 ? (
+                     <img src={sealBase64} alt="FIB Seal" className="w-64 h-64 object-contain mb-16 opacity-90" />
+                   ) : (
+                     <div className="w-64 h-64 bg-black/10 rounded-full mb-16" />
+                   )}
                 
-                <input 
-                  type="text" 
-                  value="FEDERAL INVESTIGATION BUREAU" 
-                  disabled 
-                  className="w-full text-[30px] font-serif font-bold text-black/80 tracking-widest mb-4 text-center bg-transparent outline-none" 
-                />
+                <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center leading-tight">
+                  FEDERAL<br />INVESTIGATION<br />BUREAU
+                </h1>
                 
                 <div className="w-full h-1 bg-black/60 mb-2"></div>
                 <div className="w-full h-0.5 bg-black/40 mb-16"></div>
@@ -578,7 +737,21 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
                     <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">{metadata.agentName || '---'}</div>
                   </div>
                 </div>
+
+                {/* COVER ELEMENTS */}
+                {coverElements.map(el => (
+                  <DraggableElement
+                    key={el.id}
+                    el={el}
+                    selected={selectedElement === el.id}
+                    onSelect={() => setSelectedElement(el.id)}
+                    onChange={(changes) => updateElement('cover', el.id, changes)}
+                    onDelete={() => deleteElement('cover', el.id)}
+                    readOnly={isSignedMode}
+                  />
+                ))}
              </div>
+          </div>
           </div>
 
           <div ref={docRef} className="flex flex-col gap-16 items-center w-full">
@@ -594,14 +767,17 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
                        <ImageIcon className="w-5 h-5"/>
                      </button>
                      <div className="w-full h-px bg-slate-700 my-1"></div>
-                     <button onClick={() => addElement(page.id, 'circle')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-red-500 shadow" title="Adicionar Círculo (Marcação)">
+                     <button onClick={() => addElement(page.id, 'circle')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-red-500 shadow" title="Adicionar Círculo a Mão (Rabisco)">
                        <Circle className="w-5 h-5"/>
                      </button>
-                     <button onClick={() => addElement(page.id, 'rect')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-red-500 shadow" title="Adicionar Quadrado (Marcação)">
-                       <Square className="w-5 h-5"/>
+                     <button onClick={() => addElement(page.id, 'arrow')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-red-500 shadow" title="Adicionar Seta a Mão">
+                       <MoveUpRight className="w-5 h-5"/>
                      </button>
-                     <button onClick={() => addElement(page.id, 'cross')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-red-500 shadow" title="Adicionar Cruz/X">
+                     <button onClick={() => addElement(page.id, 'cross')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-red-500 shadow" title="Adicionar Cruz/X a Mão">
                        <X className="w-5 h-5"/>
+                     </button>
+                     <button onClick={() => addElement(page.id, 'redact')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-black shadow pointer-events-auto" title="Adicionar Tarja/Rabiscos">
+                       <Highlighter className="w-5 h-5"/>
                      </button>
                      <div className="w-full h-px bg-slate-700 my-1"></div>
                      <button onClick={() => addElement(page.id, 'stamp')} className="p-2 w-full flex justify-center bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow" title="Adicionar Carimbo">
@@ -618,7 +794,67 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
                 </div>
 
                 {/* PAPER */}
-                <div className="document-page relative w-[794px] h-[1123px] bg-white shadow-xl flex flex-col z-10 overflow-hidden">
+                <div 
+                  className={`document-page relative w-[794px] h-[1123px] bg-white shadow-xl flex flex-col z-10 overflow-hidden ${drawMode ? 'cursor-crosshair' : ''}`}
+                  onPointerDown={(e) => {
+                    if (!drawMode) return;
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    setActiveDrawPage(page.id);
+                    setCurrentPathPoints([{x, y}]);
+                  }}
+                  onPointerMove={(e) => {
+                    if (activeDrawPage !== page.id || currentPathPoints.length === 0) return;
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    setCurrentPathPoints(prev => [...prev, {x, y}]);
+                  }}
+                  onPointerUp={(e) => {
+                    if (activeDrawPage === page.id && currentPathPoints.length > 1) {
+                       e.currentTarget.releasePointerCapture(e.pointerId);
+                       const minX = Math.min(...currentPathPoints.map(p => p.x));
+                       const minY = Math.min(...currentPathPoints.map(p => p.y));
+                       const maxX = Math.max(...currentPathPoints.map(p => p.x));
+                       const maxY = Math.max(...currentPathPoints.map(p => p.y));
+                       
+                       const normPoints = currentPathPoints.map(p => ({ x: p.x - minX, y: p.y - minY }));
+                       
+                       const newEl: ReportElement = {
+                          id: uuidv4(),
+                          type: 'drawing',
+                          x: minX,
+                          y: minY,
+                          width: Math.max(maxX - minX, 10),
+                          height: Math.max(maxY - minY, 10),
+                          points: normPoints,
+                          content: '',
+                          textColor: '#000000',
+                          angle: 0
+                       };
+                       
+                       setPages(prev => prev.map(p => p.id === page.id ? { ...p, elements: [...p.elements, newEl] } : p));
+                    }
+                    setCurrentPathPoints([]);
+                    setActiveDrawPage(null);
+                  }}
+                >
+                  {/* Drawing Indicator layer */}
+                  {activeDrawPage === page.id && currentPathPoints.length > 0 && (
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none z-50">
+                       <polyline 
+                         points={currentPathPoints.map(p => `${p.x},${p.y}`).join(' ')} 
+                         fill="none" 
+                         stroke="#000000" 
+                         strokeWidth="3" 
+                         strokeLinecap="round" 
+                         strokeLinejoin="round" 
+                       />
+                    </svg>
+                  )}
+
                   {sealBase64 && (
                     <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none overflow-hidden z-0">
                       <img src={sealBase64} alt="" className="w-[600px] h-[600px] object-contain grayscale" />
@@ -626,7 +862,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
                   )}
 
                   {/* Header */}
-                  <div className="h-32 px-16 pt-12 shrink-0 flex items-start justify-between border-b-2 border-black/80 z-0">
+                  <div className="h-32 mx-16 pt-12 shrink-0 flex items-start justify-between border-b-2 border-black/80 z-0">
                     {sealBase64 && <img src={sealBase64} alt="FIB" className="w-16 h-16 object-contain" />}
                     <h2 className="text-xl font-bold font-serif tracking-wider text-black/90">FEDERAL INVESTIGATION BUREAU</h2>
                   </div>
