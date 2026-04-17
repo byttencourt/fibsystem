@@ -479,23 +479,30 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
       initial={{ opacity: 0, scale: 0.95, y: 20 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: 20 }}
-      className={`absolute inset-0 z-50 bg-slate-900 border border-slate-700/50 shadow-2xl overflow-hidden flex flex-col pointer-events-auto ${
-        isMaximized ? 'rounded-none' : 'rounded-lg max-w-[1200px] max-h-[85vh] mx-auto mt-[5vh]'
+      transition={{ duration: 0.2 }}
+      className={`absolute bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col z-50 pointer-events-auto transition-all duration-200 ${
+        isMaximized 
+          ? 'inset-0 rounded-none' 
+          : 'inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[1200px] md:h-[800px] rounded-lg'
       }`}
       onClick={() => setSelectedElement(null)}
     >
       {/* App Titlebar */}
-      <div className="h-10 bg-slate-950 flex items-center justify-between px-4 border-b border-slate-800/50 select-none shrink-0" onDoubleClick={onMaximize}>
-        <div className="flex items-center gap-2">
-          <FileText className="w-4 h-4 text-blue-400" />
-          <span className="text-sm font-medium text-slate-200">
-            Dossiê Investigativo (Canva Mode)
-          </span>
+      <div className="h-10 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-3 select-none" onDoubleClick={onMaximize}>
+        <div className="flex items-center gap-2 text-slate-300">
+          <img src="https://kappa.lol/TkFgCM" alt="Icon" className="w-5 h-5 rounded-sm" referrerPolicy="no-referrer" />
+          <span className="text-sm font-medium">F.I.B - Sistema de Relatórios</span>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={onMinimize} className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"><Minimize2 className="w-3.5 h-3.5" /></button>
-          <button onClick={onMaximize} className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"><Maximize2 className="w-3.5 h-3.5" /></button>
-          <button onClick={onClose} className="p-1.5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded transition-colors"><X className="w-3.5 h-3.5" /></button>
+          <button onClick={onMinimize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors">
+            <Minus className="w-4 h-4" />
+          </button>
+          <button onClick={onMaximize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors hidden md:block">
+            <Square className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white hover:bg-red-500 rounded transition-colors">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
