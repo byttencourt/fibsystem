@@ -56,7 +56,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
     outrasMedidas: '',
     juizAssinatura: '',
     parecerJuiz: '',
-    statusMandado: 'Aprovado'
+    statusMandado: 'Pendente'
   });
 
   useEffect(() => {
@@ -256,11 +256,12 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
                         <label className="block text-xs font-medium text-amber-200 mb-1">Status da Solicitação</label>
                         <select 
                           name="statusMandado" 
-                          value={formData.statusMandado || 'Aprovado'} 
+                          value={formData.statusMandado || 'Pendente'} 
                           onChange={handleChange} 
                           disabled={isSignedMode}
                           className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all ${isSignedMode ? 'opacity-70 cursor-not-allowed' : ''}`}
                         >
+                          <option value="Pendente">Pendente</option>
                           <option value="Aprovado">Aprovado</option>
                           <option value="Aprovado com Restrições">Aprovado com Restrições</option>
                           <option value="Negado">Negado</option>
@@ -475,39 +476,32 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
   const [watermarkBase64, setWatermarkBase64] = useState<string>('');
 
   useEffect(() => {
-    const fetchImage = async (url: string, setter: (val: string) => void) => {
-      // Set the URL immediately so it's visible on screen right away!
-      setter(url);
+    const fetchLocalImage = async () => {
+      const logoUrl = '/logo.png';
+      // Set immediately for fast display
+      setSealBase64(logoUrl);
+      setCoverSealBase64(logoUrl);
+      setWatermarkBase64(logoUrl);
 
-      // Fetch base64 in background for html-to-image export compatibility
-      const proxies = [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-        `https://wsrv.nl/?url=${encodeURIComponent(url)}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
-      ];
-
-      for (const proxy of proxies) {
-        try {
-          const res = await fetch(proxy);
-          if (!res.ok) continue;
-          const blob = await res.blob();
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            if (reader.result) setter(reader.result as string);
-          };
-          reader.readAsDataURL(blob);
-          return; // Success, replaced direct URL with base64 for safe exporting
-        } catch (e) {
-          // Ignore and try next proxy
-        }
+      try {
+        const res = await fetch(logoUrl);
+        const blob = await res.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (reader.result) {
+            const base64 = reader.result as string;
+            setSealBase64(base64);
+            setCoverSealBase64(base64);
+            setWatermarkBase64(base64);
+          }
+        };
+        reader.readAsDataURL(blob);
+      } catch (e) {
+        console.error('Failed to convert local logo to base64', e);
       }
-      console.warn('All proxies failed to load image as base64. Export might fail, but image will remain visible:', url);
     };
 
-    const logoUrl = 'https://i.postimg.cc/L6BrHtB9/de7hpuu-0ddf58ce-f5db-4de7-9cb7-a83ff0c4fa48.png';
-    fetchImage(logoUrl, setSealBase64);
-    fetchImage(logoUrl, setCoverSealBase64);
-    fetchImage(logoUrl, setWatermarkBase64);
+    fetchLocalImage();
   }, []);
 
   const exportSingleImage = async (element: HTMLElement, filename: string, bgColor: string = 'rgba(0,0,0,0)') => {
@@ -672,23 +666,8 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
     )
   });
 
-  if (formData.parecerJuiz || formData.statusMandado) {
-    blocks.push({
-      id: 'parecer_juiz',
-      height: 100 + Math.ceil((formData.parecerJuiz?.length || 0) / 80) * 20,
-      render: () => (
-        <section key="parecer_juiz" className="mb-6 bg-gray-100/50 p-4 border border-gray-300">
-          <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">DECISÃO JUDICIAL</h3>
-          <p className="mb-2 text-sm"><span className="font-bold">Status:</span> {formData.statusMandado || 'Aprovado'}</p>
-          {formData.parecerJuiz && (
-            <>
-              <p className="font-bold mt-2 text-sm">Parecer / Observações:</p>
-              <p className="whitespace-pre-wrap ml-4 text-sm text-justify leading-relaxed">{formData.parecerJuiz}</p>
-            </>
-          )}
-        </section>
-      )
-    });
+  if (false) {
+    // legacy disabled
   }
 
   blocks.push({
@@ -727,9 +706,64 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
 
   const pages: Block[][] = [
     blocks.filter(b => ['header', 'requerente', 'informacoes', 'base_legal'].includes(b.id)),
-    blocks.filter(b => ['solicitacao'].includes(b.id)),
-    blocks.filter(b => ['declaracao', 'parecer_juiz', 'assinaturas'].includes(b.id))
+    blocks.filter(b => ['solicitacao', 'declaracao'].includes(b.id))
   ];
+
+  if (formData.parecerJuiz || formData.statusMandado) {
+    const textAvailable = formData.parecerJuiz || '';
+    const paragraphs = textAvailable.split('\n');
+    const MAX_CHARS_PER_PAGE = 2500;
+    
+    let chunkText = '';
+    let currentChunkCharCount = 0;
+    let pageIndex = 0;
+
+    const renderParecerJuizBlock = (text: string, isFirst: boolean, status: string | undefined, index: number) => (
+      <section key={`parecer_juiz_${index}`} className="mb-6 bg-gray-100/50 p-4 border border-gray-300 min-h-[400px]">
+        {isFirst ? (
+          <>
+            <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">DECISÃO JUDICIAL</h3>
+            <p className="mb-2 text-sm"><span className="font-bold">Status:</span> {status || 'Pendente'}</p>
+            {text && <p className="font-bold mt-2 text-sm">Parecer / Observações:</p>}
+          </>
+        ) : (
+          <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1 text-black/50">DECISÃO JUDICIAL (Continuação)</h3>
+        )}
+        {text && <p className="whitespace-pre-wrap ml-4 mt-2 text-sm text-justify leading-relaxed">{text}</p>}
+      </section>
+    );
+
+    for (let i = 0; i < paragraphs.length; i++) {
+        const p = paragraphs[i];
+        if (currentChunkCharCount + p.length > MAX_CHARS_PER_PAGE && chunkText !== '') {
+            const textToRender = chunkText.trim();
+            const isFirst = pageIndex === 0;
+            const idx = pageIndex;
+            pages.push([{
+                id: `parecer_juiz_${idx}`,
+                height: 800,
+                render: () => renderParecerJuizBlock(textToRender, isFirst, formData.statusMandado, idx)
+            }]);
+            chunkText = p + '\n';
+            currentChunkCharCount = p.length + 1;
+            pageIndex++;
+        } else {
+            chunkText += p + '\n';
+            currentChunkCharCount += p.length + 1;
+        }
+    }
+    
+    // flush remainder
+    const isFirst = pageIndex === 0;
+    const idx = pageIndex;
+    pages.push([{
+        id: `parecer_juiz_${idx}`,
+        height: 800,
+        render: () => renderParecerJuizBlock(chunkText.trim(), isFirst, formData.statusMandado, idx)
+    }]);
+  }
+
+  pages.push(blocks.filter(b => ['assinaturas'].includes(b.id)));
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950">

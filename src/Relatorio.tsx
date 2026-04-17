@@ -1,130 +1,477 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Minus, Square, FileText, Copy, Check, ChevronLeft, Printer, Image as ImageIcon, Save, FolderOpen, Trash2, Download } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useRef, useEffect } from 'react';
+import { motion } from 'motion/react';
+import { 
+  ChevronLeft, Download, Image as ImageIcon, Type, Square, Save, 
+  Trash2, Check, Copy, FileText, Maximize2, Minimize2, X, PlusCircle, Trash,
+  Circle, Minus, ArrowDownToLine
+} from 'lucide-react';
 import { toBlob } from 'html-to-image';
+import { Rnd } from 'react-rnd';
+import { v4 as uuidv4 } from 'uuid';
 
-export type RelatorioData = {
+export type ElementType = 'text' | 'image' | 'stamp' | 'circle' | 'rect' | 'cross';
+
+export interface ReportElement {
+  id: string;
+  type: ElementType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  content: string; 
+  fontSize?: number;
+  textColor?: string;
+  fontWeight?: string;
+  imageStyle?: 'normal' | 'polaroid';
+}
+
+export interface EditorPage {
+  id: string;
+  elements: ReportElement[];
+}
+
+export interface RelatorioMetadata {
   directiveNo: string;
+  operationName: string;
   issueDate: string;
   agentName: string;
-  operationName: string;
-  investigationDate: string;
   classification: string;
-  objetivo: string;
-  organizacao: string;
-  historico: string;
-  analise: string;
-  inteligencia: string;
-  fundamentacao: string;
-  medidas: string;
-  conclusao: string;
-  agenteAssinatura: string;
-  diretorAssinatura: string;
+  agenteAssinatura?: string;
+  diretorAssinatura?: string;
+}
+
+const DEFAULT_METADATA: RelatorioMetadata = {
+  directiveNo: '',
+  operationName: '',
+  issueDate: new Date().toISOString().split('T')[0],
+  agentName: '',
+  classification: 'RELATÓRIO DE INVESTIGAÇÃO',
 };
 
-export type Draft = {
-  id: string;
-  title: string;
-  date: string;
-  data: RelatorioData;
-};
+function migrateLegacyData(legacy: any): EditorPage[] {
+  const pages: EditorPage[] = [];
 
-export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }: { isMaximized: boolean, onClose: () => void, onMinimize: () => void, onMaximize: () => void }) {
-  const [view, setView] = useState<'form' | 'preview'>('form');
-  const [isDiretorMode, setIsDiretorMode] = useState(false);
-  const [isSignedMode, setIsSignedMode] = useState(false);
-  const [linkGerado, setLinkGerado] = useState(false);
-  const [linkAssinadoGerado, setLinkAssinadoGerado] = useState(false);
-  const [showDraftsModal, setShowDraftsModal] = useState(false);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [formData, setFormData] = useState<RelatorioData>({
-    directiveNo: '',
-    issueDate: new Date().toISOString().split('T')[0],
-    agentName: '',
-    operationName: '',
-    investigationDate: '',
-    classification: 'CONFIDENTIAL',
-    objetivo: '',
-    organizacao: '',
-    historico: '',
-    analise: '',
-    inteligencia: '',
-    fundamentacao: '',
-    medidas: '',
-    conclusao: '',
-    agenteAssinatura: '',
-    diretorAssinatura: ''
+  // Page 1
+  pages.push({
+    id: uuidv4(),
+    elements: [
+      { id: uuidv4(), type: 'text', x: 64, y: 120, width: 660, height: 150, content: '1. OBJETIVO DA INVESTIGAÇÃO\n\n' + (legacy.objetivo || ''), fontWeight: 'normal', fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 300, width: 660, height: 150, content: '2. ORGANIZAÇÃO INVESTIGADA\n\n' + (legacy.organizacao || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 500, width: 660, height: 250, content: '3. HISTÓRICO DE OCORRÊNCIAS\n\n' + (legacy.historico || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 800, width: 660, height: 150, content: '4. ANÁLISE DE PADRÃO CRIMINAL\n\n' + (legacy.analise || ''), fontSize: 12 }
+    ]
   });
 
+  // Page 2
+  pages.push({
+    id: uuidv4(),
+    elements: [
+      { id: uuidv4(), type: 'text', x: 64, y: 120, width: 660, height: 200, content: '5. INTELIGÊNCIA COLETADA\n\n' + (legacy.inteligencia || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 350, width: 660, height: 150, content: '6. FUNDAMENTAÇÃO LEGAL\n\n' + (legacy.fundamentacao || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 550, width: 660, height: 150, content: '7. MEDIDAS OPERACIONAIS ATIVAS\n\n' + (legacy.medidas || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 750, width: 660, height: 150, content: '8. CONCLUSÃO\n\n' + (legacy.conclusao || ''), fontSize: 12 }
+    ]
+  });
+
+  return pages;
+}
+
+function DraggableElement({ 
+  el, selected, onSelect, onChange, onDelete, onMoveToNextPage, readOnly 
+}: { 
+  el: ReportElement;
+  selected: boolean;
+  onSelect: () => void;
+  onChange: (updates: Partial<ReportElement>) => void;
+  onDelete: () => void;
+  onMoveToNextPage?: () => void;
+  readOnly: boolean;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [tempText, setTempText] = useState(el.content);
+
+  const handleDoubleClick = () => {
+    if (readOnly || el.type !== 'text') return;
+    setIsEditing(true);
+  };
+
+  const handleBlur = () => {
+    setIsEditing(false);
+    onChange({ content: tempText });
+  };
+
+  return (
+    <Rnd
+      position={{ x: el.x, y: el.y }}
+      size={{ width: el.width, height: el.height }}
+      onDragStart={onSelect}
+      onDragStop={(e, d) => !readOnly && onChange({ x: d.x, y: d.y })}
+      onResizeStop={(e, direction, ref, delta, position) => {
+        if (readOnly) return;
+        onChange({ 
+          width: parseInt(ref.style.width), 
+          height: parseInt(ref.style.height),
+          ...position 
+        });
+      }}
+      disableDragging={isEditing || readOnly}
+      enableResizing={!isEditing && !readOnly}
+      bounds="parent"
+      className={`group ${selected && !readOnly ? 'ring-2 ring-blue-500/50' : ''}`}
+      style={{ zIndex: selected ? 10 : 1 }}
+    >
+      {selected && !isEditing && !readOnly && (
+        <>
+          <button 
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="absolute -top-8 right-0 bg-red-600 text-white p-1.5 rounded-full shadow hover:bg-red-500"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+          {onMoveToNextPage && (
+            <button 
+              onClick={(e) => { e.stopPropagation(); onMoveToNextPage(); }}
+              className="absolute -top-8 right-10 bg-blue-600 text-white p-1.5 rounded-full shadow hover:bg-blue-500"
+              title="Mover para a Próxima Página (Resolve sobreposição)"
+            >
+              <ArrowDownToLine className="w-3 h-3" />
+            </button>
+          )}
+        </>
+      )}
+
+      {selected && !isEditing && !readOnly && el.type === 'image' && (
+        <div className="absolute -top-10 left-0 bg-slate-800 text-white p-1 rounded shadow flex gap-1 items-center z-50">
+           <button onClick={() => onChange({ imageStyle: 'normal' })} className={`px-2 py-1 text-xs rounded ${(!el.imageStyle || el.imageStyle === 'normal') ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>Padrão</button>
+           <button onClick={() => onChange({ imageStyle: 'polaroid' })} className={`px-2 py-1 text-xs rounded ${el.imageStyle === 'polaroid' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>Polaroid</button>
+        </div>
+      )}
+
+      {selected && !isEditing && !readOnly && el.type === 'text' && (
+        <div className="absolute -top-10 left-0 bg-slate-800 text-white p-1 rounded shadow flex gap-1 items-center z-50">
+           <button onClick={() => onChange({ fontWeight: el.fontWeight === 'bold' ? 'normal' : 'bold' })} className={`px-2 py-1 text-xs rounded ${el.fontWeight === 'bold' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>B</button>
+           <button onClick={() => onChange({ fontSize: (el.fontSize || 14) - 2 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700">A-</button>
+           <button onClick={() => onChange({ fontSize: (el.fontSize || 14) + 2 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700">A+</button>
+           <div className="h-4 w-px bg-slate-600 mx-1"></div>
+           <button onClick={() => onChange({ textColor: '#ef4444' })} className="w-4 h-4 rounded-full bg-red-500 hover:scale-110"></button>
+           <button onClick={() => onChange({ textColor: '#000000' })} className="w-4 h-4 rounded-full bg-black border hover:scale-110"></button>
+        </div>
+      )}
+
+      <div 
+        className="w-full h-full relative" 
+        onDoubleClick={handleDoubleClick}
+        onClick={(e) => { e.stopPropagation(); onSelect(); }}
+      >
+        {el.type === 'text' ? (
+          isEditing ? (
+            <textarea
+              autoFocus
+              className="w-full h-full bg-blue-50/50 border-none outline-none resize-none font-sans"
+              style={{
+                fontSize: el.fontSize || 14,
+                fontWeight: el.fontWeight || 'normal',
+                color: el.textColor || '#000000',
+              }}
+              value={tempText}
+              onChange={(e) => {
+                 setTempText(e.target.value);
+                 if (e.target.scrollHeight > el.height) {
+                    onChange({ height: e.target.scrollHeight });
+                 }
+              }}
+              onBlur={handleBlur}
+            />
+          ) : (
+            <div 
+              className="w-full h-full whitespace-pre-wrap font-sans cursor-text overflow-hidden leading-relaxed"
+              style={{
+                fontSize: el.fontSize || 14,
+                fontWeight: el.fontWeight || 'normal',
+                color: el.textColor || '#000000',
+              }}
+            >
+              {el.content}
+            </div>
+          )
+        ) : el.type === 'image' ? (
+          el.imageStyle === 'polaroid' ? (
+            <div className="w-full h-full bg-[#f8f8f8] p-3 pb-12 shadow-md border border-slate-200 pointer-events-none relative shadow-[2px_4px_12px_rgba(0,0,0,0.15)] flex flex-col">
+              {/* Fita adesiva */}
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-16 h-6 bg-yellow-100/60 shadow-[0_1px_2px_rgba(0,0,0,0.1)] transform -rotate-3 z-10"></div>
+              
+              <div className="flex-1 w-full relative overflow-hidden bg-black">
+                 <img src={el.content} className="absolute inset-0 w-full h-full object-cover grayscale-[20%] contrast-125" alt="" />
+              </div>
+              <div className="absolute bottom-3 left-0 w-full text-center font-mono text-sm text-black/60 font-bold uppercase tracking-widest">EVIDENCE</div>
+            </div>
+          ) : (
+            <img src={el.content} className="w-full h-full object-cover pointer-events-none shadow" alt="" />
+          )
+        ) : el.type === 'circle' ? (
+          <div className="w-full h-full border-4 border-red-500 rounded-full bg-transparent pointer-events-none shadow-sm" style={{ borderColor: el.textColor || '#ef4444' }}></div>
+        ) : el.type === 'rect' ? (
+          <div className="w-full h-full border-4 border-red-500 bg-transparent pointer-events-none shadow-sm" style={{ borderColor: el.textColor || '#ef4444' }}></div>
+        ) : el.type === 'cross' ? (
+          <div className="w-full h-full relative pointer-events-none">
+            <div className="absolute top-1/2 left-0 w-full h-1 bg-red-500 rotate-45 transform -translate-y-1/2" style={{ backgroundColor: el.textColor || '#ef4444' }}></div>
+            <div className="absolute top-1/2 left-0 w-full h-1 bg-red-500 -rotate-45 transform -translate-y-1/2" style={{ backgroundColor: el.textColor || '#ef4444' }}></div>
+          </div>
+        ) : (
+          <div className="w-full h-full flex items-center justify-center font-bold font-serif text-red-600 border-4 border-red-600 rotate-[-15deg] opacity-80 pointer-events-none uppercase text-2xl">
+            {el.content}
+          </div>
+        )}
+      </div>
+    </Rnd>
+  );
+}
+
+export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }: { isMaximized: boolean, onClose: () => void, onMinimize: () => void, onMaximize: () => void }) {
+  const [metadata, setMetadata] = useState<RelatorioMetadata>(DEFAULT_METADATA);
+  const [pages, setPages] = useState<EditorPage[]>([]);
+  const [isSignedMode, setIsSignedMode] = useState(false);
+  const [isDiretorMode, setIsDiretorMode] = useState(false);
+  
+  const [selectedElement, setSelectedElement] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  
+  const [sealBase64, setSealBase64] = useState<string>('');
+  const docRef = useRef<HTMLDivElement>(null);
+  const coverRef = useRef<HTMLDivElement>(null);
+  const [linkGerado, setLinkGerado] = useState(false);
+
   useEffect(() => {
+    const fetchLocalImage = async () => {
+      try {
+        const logoUrl = '/logo.png';
+        setSealBase64(logoUrl);
+        const res = await fetch(logoUrl);
+        const blob = await res.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (reader.result) setSealBase64(reader.result as string);
+        };
+        reader.readAsDataURL(blob);
+      } catch (e) { console.error(e); }
+    };
+    fetchLocalImage();
+
     const params = new URLSearchParams(window.location.search);
-    const dataParam = params.get('data_relatorio');
+    const dataParam = params.get('data');
     if (dataParam) {
       try {
         const decoded = JSON.parse(decodeURIComponent(atob(dataParam)));
-        setFormData(prev => ({ ...prev, ...decoded }));
-        setIsDiretorMode(true);
-        if (decoded.diretorAssinatura && decoded.diretorAssinatura.trim() !== '') {
-          setIsSignedMode(true);
+        
+        if (decoded.pages) {
+          setPages(decoded.pages);
+          setMetadata({
+            directiveNo: decoded.directiveNo,
+            operationName: decoded.operationName,
+            issueDate: decoded.issueDate,
+            agentName: decoded.agentName,
+            classification: decoded.classification,
+            agenteAssinatura: decoded.agenteAssinatura,
+            diretorAssinatura: decoded.diretorAssinatura
+          });
+        } else if (Object.keys(decoded).length > 0) {
+          // Legacy payload
+          setMetadata({
+            directiveNo: decoded.directiveNo || '',
+            operationName: decoded.nomeOperacao || '',
+            issueDate: decoded.dataSolicitacao || new Date().toISOString().split('T')[0],
+            agentName: decoded.requerenteBadge || '',
+            classification: decoded.classification || 'RELATÓRIO DE INVESTIGAÇÃO',
+            agenteAssinatura: decoded.agenteAssinatura,
+            diretorAssinatura: decoded.diretorAssinatura
+          });
+          setPages(migrateLegacyData(decoded));
+        } else {
+          setPages(migrateLegacyData({}));
         }
-      } catch (e) {
-        console.error("Erro ao carregar dados do link", e);
-      }
-    }
 
-    // Load drafts
-    const savedDrafts = localStorage.getItem('fib_relatorios_drafts');
-    if (savedDrafts) {
-      try {
-        setDrafts(JSON.parse(savedDrafts));
+        if (decoded.diretorAssinatura) setIsSignedMode(true);
+        if (params.get('mode') === 'diretor' && !decoded.diretorAssinatura) setIsDiretorMode(true);
       } catch (e) {
-        console.error("Erro ao carregar rascunhos", e);
+        console.error("Erro ao carregar dados", e);
+        setPages(migrateLegacyData({}));
       }
+    } else {
+      setPages(migrateLegacyData({}));
     }
   }, []);
 
-  const saveDraft = () => {
-    const newDraft: Draft = {
-      id: Date.now().toString(),
-      title: formData.operationName || formData.directiveNo || 'Rascunho sem título',
-      date: new Date().toLocaleString(),
-      data: formData
+  const handleMetadataChange = (key: keyof RelatorioMetadata, value: string) => {
+    setMetadata(prev => ({ ...prev, [key]: value }));
+  };
+
+  const addElement = (pageId: string, type: ElementType, customContent?: string) => {
+    let content = 'Novo Texto';
+    let width = 300;
+    let height = 100;
+
+    if (type === 'stamp') {
+      content = 'CONFIDENCIAL';
+      width = 250;
+      height = 60;
+    } else if (type === 'image' && customContent) {
+      content = customContent;
+      width = 200;
+      height = 200;
+    } else if (type === 'circle' || type === 'rect') {
+      content = '';
+      width = 150;
+      height = 150;
+    } else if (type === 'cross') {
+      content = '';
+      width = 100;
+      height = 100;
+    }
+
+    const newEl: ReportElement = {
+      id: uuidv4(),
+      type,
+      x: 100,
+      y: 100,
+      width,
+      height,
+      content,
+      fontSize: 14,
+      textColor: type === 'stamp' ? '#dc2626' : '#000000'
     };
-    const updatedDrafts = [newDraft, ...drafts];
-    setDrafts(updatedDrafts);
-    localStorage.setItem('fib_relatorios_drafts', JSON.stringify(updatedDrafts));
-    alert('Rascunho salvo com sucesso!');
+
+    setPages(prev => prev.map(p => {
+      if (p.id === pageId) {
+        return { ...p, elements: [...p.elements, newEl] };
+      }
+      return p;
+    }));
+    setSelectedElement(newEl.id);
   };
 
-  const loadDraft = (draft: Draft) => {
-    setFormData(draft.data);
-    setShowDraftsModal(false);
+  const handleImageUpload = (pageId: string) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (reader.result) addElement(pageId, 'image', reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    input.click();
   };
 
-  const deleteDraft = (id: string) => {
-    const updatedDrafts = drafts.filter(d => d.id !== id);
-    setDrafts(updatedDrafts);
-    localStorage.setItem('fib_relatorios_drafts', JSON.stringify(updatedDrafts));
+  const updateElement = (pageId: string, elId: string, updates: Partial<ReportElement>) => {
+    setPages(prev => prev.map(p => {
+      if (p.id === pageId) {
+        const oldEl = p.elements.find(e => e.id === elId);
+        let newElements = p.elements.map(el => el.id === elId ? { ...el, ...updates } : el);
+        
+        // Auto-push layout logic: If height grows, push elements below it downwards
+        if (updates.height !== undefined && oldEl && updates.height > oldEl.height) {
+           const dy = updates.height - oldEl.height;
+           newElements = newElements.map(e => {
+              if (e.id !== elId && e.y >= oldEl.y + oldEl.height - 20) {
+                 return { ...e, y: e.y + dy };
+              }
+              return e;
+           });
+        }
+        
+        return { ...p, elements: newElements };
+      }
+      return p;
+    }));
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  const moveElementToNextPage = (pageIndex: number, elId: string) => {
+    setPages(prev => {
+      const newPages = [...prev];
+      const sourcePage = newPages[pageIndex];
+      const elIndex = sourcePage.elements.findIndex(e => e.id === elId);
+      if (elIndex === -1) return prev;
+      
+      const elToMove = { ...sourcePage.elements[elIndex], y: 150 };
+      sourcePage.elements.splice(elIndex, 1);
+      
+      if (pageIndex + 1 < newPages.length) {
+        newPages[pageIndex + 1].elements.push(elToMove);
+      } else {
+        newPages.push({ id: uuidv4(), elements: [elToMove] });
+      }
+      return newPages;
+    });
   };
 
-  const gerarLinkDiretor = () => {
-    const dataString = btoa(encodeURIComponent(JSON.stringify(formData)));
-    const url = `${window.location.origin}${window.location.pathname}?data_relatorio=${dataString}`;
+  const deleteElement = (pageId: string, elId: string) => {
+    setPages(prev => prev.map(p => {
+      if (p.id === pageId) {
+        return { ...p, elements: p.elements.filter(el => el.id !== elId) };
+      }
+      return p;
+    }));
+    setSelectedElement(null);
+  };
+
+  const addPage = () => {
+    setPages([...pages, { id: uuidv4(), elements: [] }]);
+  };
+
+  const deletePage = (id: string) => {
+    if (pages.length > 1) {
+      setPages(pages.filter(p => p.id !== id));
+    }
+  };
+
+  const gerarLink = () => {
+    const dataString = btoa(encodeURIComponent(JSON.stringify({ ...metadata, pages })));
+    const url = `${window.location.origin}${window.location.pathname}?data=${dataString}&mode=agente`;
     navigator.clipboard.writeText(url);
     setLinkGerado(true);
     setTimeout(() => setLinkGerado(false), 3000);
   };
 
-  const gerarLinkAssinado = () => {
-    const dataString = btoa(encodeURIComponent(JSON.stringify(formData)));
-    const url = `${window.location.origin}${window.location.pathname}?data_relatorio=${dataString}`;
-    navigator.clipboard.writeText(url);
-    setLinkAssinadoGerado(true);
-    setTimeout(() => setLinkAssinadoGerado(false), 3000);
+  const exportSingleImage = async (element: HTMLElement, filename: string, bgColor: string = 'rgba(0,0,0,0)') => {
+    const blob = await toBlob(element, { pixelRatio: 2, backgroundColor: bgColor });
+    if (!blob) throw new Error('Falha ao gerar');
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportDocument = async () => {
+    if (!docRef.current || !coverRef.current) return;
+    setIsExporting(true);
+    setSelectedElement(null); // Clear selection rings
+    
+    // Give react time to remove selection rendering
+    await new Promise(r => setTimeout(r, 100));
+
+    try {
+      await exportSingleImage(coverRef.current, `1_Capa_${metadata.directiveNo || 'Relatorio'}.png`, '#c29b6c');
+      await new Promise(r => setTimeout(r, 500));
+      
+      const pageElements = docRef.current.querySelectorAll('.document-page');
+      for (let i = 0; i < pageElements.length; i++) {
+        await exportSingleImage(pageElements[i] as HTMLElement, `${i + 2}_Pagina_${i + 1}_${metadata.directiveNo || 'Relatorio'}.png`);
+        await new Promise(res => setTimeout(res, 500));
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao exportar documento.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -132,706 +479,209 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
       initial={{ opacity: 0, scale: 0.95, y: 20 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: 20 }}
-      transition={{ duration: 0.2 }}
-      className={`absolute bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col z-40 transition-all duration-200 ${
-        isMaximized 
-          ? 'inset-0 rounded-none' 
-          : 'inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[1000px] md:h-[750px] rounded-lg'
+      className={`absolute inset-0 z-50 bg-slate-900 border border-slate-700/50 shadow-2xl overflow-hidden flex flex-col pointer-events-auto ${
+        isMaximized ? 'rounded-none' : 'rounded-lg max-w-[1200px] max-h-[85vh] mx-auto mt-[5vh]'
       }`}
+      onClick={() => setSelectedElement(null)}
     >
-      {/* Window Header */}
-      <div className="h-10 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-3 select-none">
-        <div className="flex items-center gap-2 text-slate-300">
-          <img src="https://kappa.lol/TkFgCM" alt="Icon" className="w-5 h-5 rounded-sm" referrerPolicy="no-referrer" />
-          <span className="text-sm font-medium">F.I.B - Relatórios de Investigação</span>
+      {/* App Titlebar */}
+      <div className="h-10 bg-slate-950 flex items-center justify-between px-4 border-b border-slate-800/50 select-none shrink-0" onDoubleClick={onMaximize}>
+        <div className="flex items-center gap-2">
+          <FileText className="w-4 h-4 text-blue-400" />
+          <span className="text-sm font-medium text-slate-200">
+            Dossiê Investigativo (Canva Mode)
+          </span>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={onMinimize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors">
-            <Minus className="w-4 h-4" />
-          </button>
-          <button onClick={onMaximize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors hidden md:block">
-            <Square className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white hover:bg-red-500 rounded transition-colors">
-            <X className="w-4 h-4" />
-          </button>
+          <button onClick={onMinimize} className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"><Minimize2 className="w-3.5 h-3.5" /></button>
+          <button onClick={onMaximize} className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors"><Maximize2 className="w-3.5 h-3.5" /></button>
+          <button onClick={onClose} className="p-1.5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded transition-colors"><X className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 
-      {/* Window Content */}
-      <div className="flex-1 overflow-hidden flex flex-col bg-slate-900">
-        {view === 'form' ? (
-          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-            <div className="max-w-4xl mx-auto">
-              <div className="flex items-center justify-between mb-8">
-                <h2 className="text-2xl font-semibold text-white flex items-center gap-2">
-                  <FileText className="w-6 h-6 text-blue-400" />
-                  {isSignedMode ? 'Documento Assinado' : isDiretorMode ? 'Revisão e Assinatura do Diretor' : 'Formulário de Relatório'}
-                </h2>
-                <div className="flex items-center gap-3">
-                  {!isDiretorMode && (
-                    <>
-                      <button 
-                        onClick={() => setShowDraftsModal(true)}
-                        className="px-3 py-2 rounded font-medium transition-colors flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
-                        title="Abrir Rascunhos"
-                      >
-                        <FolderOpen className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={saveDraft}
-                        className="px-3 py-2 rounded font-medium transition-colors flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
-                        title="Salvar Rascunho"
-                      >
-                        <Save className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={gerarLinkDiretor}
-                        className={`px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg ${
-                          linkGerado ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20' : 'bg-slate-700 hover:bg-slate-600 text-white shadow-slate-900/20'
-                        }`}
-                      >
-                        {linkGerado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        {linkGerado ? 'Link Copiado!' : 'Copiar Link p/ Diretor'}
-                      </button>
-                    </>
-                  )}
-                  {isDiretorMode && !isSignedMode && (
-                    <button 
-                      onClick={gerarLinkAssinado}
-                      className={`px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg ${
-                        linkAssinadoGerado ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20' : 'bg-slate-700 hover:bg-slate-600 text-white shadow-slate-900/20'
-                      }`}
-                    >
-                      {linkAssinadoGerado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                      {linkAssinadoGerado ? 'Link Copiado!' : 'Copiar Link Assinado'}
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => setView('preview')}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg shadow-blue-900/20"
-                  >
-                    <Printer className="w-4 h-4" />
-                    {isDiretorMode ? 'Visualizar e Salvar' : 'Gerar Documento'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-8">
-                {isDiretorMode && (
-                  <div className="bg-amber-900/30 p-5 rounded-lg border border-amber-700/50 shadow-lg shadow-amber-900/20">
-                    <h3 className="text-sm font-bold text-amber-400 mb-4 uppercase tracking-wider border-b border-amber-700/50 pb-2">Área Exclusiva do Diretor</h3>
-                    <div>
-                      <label className="block text-xs font-medium text-amber-200 mb-1">Assinatura do Diretor (Digite seu nome)</label>
-                      <input 
-                        type="text" 
-                        name="diretorAssinatura" 
-                        value={formData.diretorAssinatura} 
-                        onChange={handleChange} 
-                        placeholder="Ex: Diretor FIB" 
-                        readOnly={isSignedMode}
-                        className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-signature text-2xl ${isSignedMode ? 'opacity-70 cursor-not-allowed' : ''}`} 
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Section 1 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">Informações Gerais</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Directive No.</label>
-                      <input type="text" name="directiveNo" value={formData.directiveNo} onChange={handleChange} placeholder="Ex: DIR-2026-001" className="form-input" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Issue Date</label>
-                      <input type="date" name="issueDate" value={formData.issueDate} onChange={handleChange} className="form-input" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Agent</label>
-                      <input type="text" name="agentName" value={formData.agentName} onChange={handleChange} placeholder="Ex: Agente Responsável" className="form-input" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Nome da Operação / Organização</label>
-                      <input type="text" name="operationName" value={formData.operationName} onChange={handleChange} placeholder="Ex: Operação Valquíria" className="form-input" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Investigation Date (Período)</label>
-                      <input type="text" name="investigationDate" value={formData.investigationDate} onChange={handleChange} placeholder="Ex: 01/01/2026 a 01/04/2026" className="form-input" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Classification</label>
-                      <select name="classification" value={formData.classification} onChange={handleChange} className="form-input">
-                        <option>PUBLIC</option>
-                        <option>INTERNAL USE ONLY</option>
-                        <option>CONFIDENTIAL</option>
-                        <option>SECRET</option>
-                        <option>TOP SECRET</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section 2 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">1. Objetivo da Investigação</h3>
-                  <textarea name="objetivo" value={formData.objetivo} onChange={handleChange} rows={3} placeholder="Definir de forma clara o propósito da investigação..." className="form-input resize-y" />
-                </div>
-
-                {/* Section 3 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">2. Organização Investigada</h3>
-                  <textarea name="organizacao" value={formData.organizacao} onChange={handleChange} rows={3} placeholder="Detalhamento do grupo investigado..." className="form-input resize-y" />
-                </div>
-
-                {/* Section 4 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">3. Histórico de Ocorrências</h3>
-                  <textarea name="historico" value={formData.historico} onChange={handleChange} rows={4} placeholder="Registro cronológico de todas as ocorrências..." className="form-input resize-y" />
-                </div>
-
-                {/* Section 5 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">4. Análise de Padrão Criminal</h3>
-                  <textarea name="analise" value={formData.analise} onChange={handleChange} rows={4} placeholder="Seção analítica onde irá interpretar os dados..." className="form-input resize-y" />
-                </div>
-
-                {/* Section 6 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">5. Inteligência Coletada</h3>
-                  <textarea name="inteligencia" value={formData.inteligencia} onChange={handleChange} rows={4} placeholder="Resumo dos métodos e informações obtidas..." className="form-input resize-y" />
-                </div>
-
-                {/* Section 7 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">6. Fundamentação Legal</h3>
-                  <textarea name="fundamentacao" value={formData.fundamentacao} onChange={handleChange} rows={3} placeholder="Base legal que sustenta a investigação..." className="form-input resize-y" />
-                </div>
-
-                {/* Section 8 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">7. Medidas Operacionais Ativas</h3>
-                  <textarea name="medidas" value={formData.medidas} onChange={handleChange} rows={3} placeholder="Lista das ações já autorizadas..." className="form-input resize-y" />
-                </div>
-
-                {/* Section 9 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">8. Conclusão</h3>
-                  <textarea name="conclusao" value={formData.conclusao} onChange={handleChange} rows={3} placeholder="Síntese final da investigação..." className="form-input resize-y" />
-                </div>
-
-                {/* Section 10 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">Assinatura do Agente</h3>
-                  <input type="text" name="agenteAssinatura" value={formData.agenteAssinatura} onChange={handleChange} placeholder="Ex: Agente John Doe" className="w-full bg-slate-950 border border-slate-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-signature text-2xl" />
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <DocumentPreview formData={formData} onBack={() => setView('form')} />
-        )}
-      </div>
-      {/* Drafts Modal */}
-      <AnimatePresence>
-        {showDraftsModal && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl w-full max-w-2xl flex flex-col max-h-[80vh]"
-            >
-              <div className="flex items-center justify-between p-4 border-b border-slate-800">
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <FolderOpen className="w-5 h-5 text-blue-400" />
-                  Rascunhos Salvos
-                </h3>
-                <button 
-                  onClick={() => setShowDraftsModal(false)}
-                  className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                {drafts.length === 0 ? (
-                  <div className="text-center text-slate-500 py-8">
-                    Nenhum rascunho salvo.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {drafts.map(draft => (
-                      <div key={draft.id} className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 flex items-center justify-between hover:border-slate-600 transition-colors">
-                        <div>
-                          <h4 className="font-medium text-slate-200">{draft.title}</h4>
-                          <p className="text-sm text-slate-500 mt-1">Salvo em: {draft.date}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={() => loadDraft(draft)}
-                            className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white rounded text-sm font-medium transition-colors"
-                          >
-                            Carregar
-                          </button>
-                          <button 
-                            onClick={() => deleteDraft(draft.id)}
-                            className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors"
-                            title="Excluir"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-}
-
-// --- Document Preview Component ---
-function DocumentPreview({ formData, onBack }: { formData: RelatorioData, onBack: () => void }) {
-  const coverRef = useRef<HTMLDivElement>(null);
-  const docRef = useRef<HTMLDivElement>(null);
-  const [isExporting, setIsExporting] = useState(false);
-
-  const [sealBase64, setSealBase64] = useState<string>('');
-  const [coverSealBase64, setCoverSealBase64] = useState<string>('');
-  const [watermarkBase64, setWatermarkBase64] = useState<string>('');
-
-  useEffect(() => {
-    const fetchImage = async (url: string, setter: (val: string) => void) => {
-      // Set the URL immediately so it's visible on screen right away!
-      setter(url);
-
-      // Fetch base64 in background for html-to-image export compatibility
-      const proxies = [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-        `https://wsrv.nl/?url=${encodeURIComponent(url)}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
-      ];
-
-      for (const proxy of proxies) {
-        try {
-          const res = await fetch(proxy);
-          if (!res.ok) continue;
-          const blob = await res.blob();
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            if (reader.result) setter(reader.result as string);
-          };
-          reader.readAsDataURL(blob);
-          return; // Success, replaced direct URL with base64 for safe exporting
-        } catch (e) {
-          // Ignore and try next proxy
-        }
-      }
-      console.warn('All proxies failed to load image as base64. Export might fail, but image will remain visible:', url);
-    };
-
-    const logoUrl = 'https://i.postimg.cc/L6BrHtB9/de7hpuu-0ddf58ce-f5db-4de7-9cb7-a83ff0c4fa48.png';
-    fetchImage(logoUrl, setSealBase64);
-    fetchImage(logoUrl, setCoverSealBase64);
-    fetchImage(logoUrl, setWatermarkBase64);
-  }, []);
-
-  const exportSingleImage = async (element: HTMLElement, filename: string, bgColor: string = 'rgba(0,0,0,0)') => {
-    const blob = await toBlob(element, {
-      pixelRatio: 2,
-      backgroundColor: bgColor,
-    });
-    if (!blob) throw new Error('Falha ao gerar a imagem.');
-    
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const exportCover = async () => {
-    if (!coverRef.current) return;
-    setIsExporting(true);
-    try {
-      await exportSingleImage(coverRef.current, `1_Capa_${formData.directiveNo || 'Relatorio'}.png`, '#c29b6c');
-    } catch (err) {
-      console.error('Failed to export cover', err);
-      alert(`Erro ao salvar a capa: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
-  const exportDocumentPages = async () => {
-    if (!docRef.current) return;
-    setIsExporting(true);
-    try {
-      const pages = docRef.current.querySelectorAll('.document-page');
-      for (let i = 0; i < pages.length; i++) {
-        const pageEl = pages[i] as HTMLElement;
-        await exportSingleImage(pageEl, `${i + 2}_Pagina_${i + 1}_${formData.directiveNo || 'Relatorio'}.png`);
-        // Small delay to prevent browser from blocking multiple downloads
-        await new Promise(res => setTimeout(res, 500));
-      }
-    } catch (err) {
-      console.error('Failed to export document pages', err);
-      alert(`Erro ao salvar as páginas: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
-  // --- Pagination Logic ---
-  const A4_CONTENT_HEIGHT = 995; // 1123 - 128 (padding)
-  
-  type Block = {
-    id: string;
-    height: number;
-    render: () => React.ReactNode;
-  };
-
-  const blocks: Block[] = [];
-
-  blocks.push({
-    id: 'header',
-    height: 280,
-    render: () => (
-      <div key="header" className="flex flex-col mb-8">
-        <div className="flex justify-between items-start border-b-2 border-black/80 pb-6 mb-6">
-          {sealBase64 ? (
-            <img src={sealBase64} alt="FIB Logo" className="w-24 h-24 object-contain" />
-          ) : (
-            <div className="w-24 h-24 bg-black/10 rounded-full" />
-          )}
-          <div className="text-right">
-            <h2 className="text-xl font-bold font-serif tracking-wider text-black/90">FEDERAL INVESTIGATION BUREAU</h2>
-            <h3 className="text-lg font-bold font-serif tracking-wide text-black/80">INVESTIGATION REPORT</h3>
-            <div className="mt-4 text-sm">
-              <p><span className="font-bold">Directive No.:</span> {formData.directiveNo}</p>
-              <p><span className="font-bold">Issue Date:</span> {formData.issueDate}</p>
-              <p><span className="font-bold">Agent:</span> {formData.agentName}</p>
-            </div>
-          </div>
-        </div>
-        <div className="border-b-2 border-black/80 pb-4">
-          <h1 className="text-xl font-bold tracking-widest text-black/90 uppercase">{formData.operationName || '[NOME DA OPERAÇÃO / ORGANIZAÇÃO]'}</h1>
-          <p className="font-bold mt-2 text-black/80 text-sm">Directive No.: <span className="font-normal">{formData.directiveNo}</span> / Issue Date: <span className="font-normal">{formData.issueDate}</span> / Investigation Date: <span className="font-normal">{formData.investigationDate}</span></p>
-          <p className="font-bold mt-1 text-black/80 text-sm">Classification/Classificação: <span className="font-normal">{formData.classification}</span></p>
-        </div>
-      </div>
-    )
-  });
-
-  blocks.push({
-    id: 'objetivo',
-    height: 80 + Math.ceil((formData.objetivo?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="objetivo" className="mb-6">
-        <h3 className="font-bold text-lg mb-2">1. OBJETIVO DA INVESTIGAÇÃO</h3>
-        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.objetivo}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'organizacao',
-    height: 80 + Math.ceil((formData.organizacao?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="organizacao" className="mb-6">
-        <h3 className="font-bold text-lg mb-2">2. ORGANIZAÇÃO INVESTIGADA</h3>
-        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.organizacao}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'historico',
-    height: 80 + Math.ceil((formData.historico?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="historico" className="mb-6">
-        <h3 className="font-bold text-lg mb-2">3. HISTÓRICO DE OCORRÊNCIAS</h3>
-        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.historico}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'analise',
-    height: 80 + Math.ceil((formData.analise?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="analise" className="mb-6">
-        <h3 className="font-bold text-lg mb-2">4. ANÁLISE DE PADRÃO CRIMINAL</h3>
-        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.analise}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'inteligencia',
-    height: 80 + Math.ceil((formData.inteligencia?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="inteligencia" className="mb-6">
-        <h3 className="font-bold text-lg mb-2">5. INTELIGÊNCIA COLETADA</h3>
-        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.inteligencia}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'fundamentacao',
-    height: 80 + Math.ceil((formData.fundamentacao?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="fundamentacao" className="mb-6">
-        <h3 className="font-bold text-lg mb-2">6. FUNDAMENTAÇÃO LEGAL</h3>
-        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.fundamentacao}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'medidas',
-    height: 80 + Math.ceil((formData.medidas?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="medidas" className="mb-6">
-        <h3 className="font-bold text-lg mb-2">7. MEDIDAS OPERACIONAIS ATIVAS</h3>
-        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.medidas}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'conclusao',
-    height: 80 + Math.ceil((formData.conclusao?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="conclusao" className="mb-6">
-        <h3 className="font-bold text-lg mb-2">8. CONCLUSÃO</h3>
-        <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed">{formData.conclusao}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'declaracao',
-    height: 140,
-    render: () => (
-      <section key="declaracao" className="mb-6">
-        <h3 className="font-bold text-lg mb-2">9. DECLARAÇÃO FINAL</h3>
-        <p className="text-justify text-sm leading-relaxed italic">
-          "Declaro, sob responsabilidade funcional e na observância dos princípios constitucionais de legalidade, devido
-          processo legal e proteção de direitos individuais, que as informações constantes neste relatório correspondem
-          fielmente aos fatos apurados durante o período indicado, estando em conformidade com as diretrizes
-          operacionais da Divisão de Inteligência e Fiscalização de Investigações da Federal Investigation Bureau, bem
-          como com os procedimentos previstos no Standard Operating Procedures da Agência e nas normas legais
-          aplicáveis aos procedimentos investigativos federais."
-        </p>
-        <p className="mt-4 text-sm">Data: {new Date().toLocaleDateString('pt-BR')}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'assinaturas',
-    height: 200,
-    render: () => (
-      <div key="assinaturas" className="mt-auto pt-8">
-        <div className="flex justify-between px-8">
-          <div className="text-center w-64 relative">
-            {formData.agenteAssinatura && (
-              <div className="absolute bottom-6 w-full text-center pointer-events-none">
-                <span className="font-signature text-4xl text-[#0000a0] -rotate-2 inline-block opacity-90">
-                  {formData.agenteAssinatura}
-                </span>
-              </div>
-            )}
-            <div className="border-b border-black mb-2"></div>
-            <p className="text-sm font-bold">Assinatura do Agente</p>
-          </div>
-          <div className="text-center w-64 relative">
-            {formData.diretorAssinatura && (
-              <div className="absolute bottom-6 w-full text-center pointer-events-none">
-                <span className="font-signature text-5xl text-black -rotate-2 inline-block opacity-90">
-                  {formData.diretorAssinatura}
-                </span>
-              </div>
-            )}
-            <div className="border-b border-black mb-2"></div>
-            <p className="text-sm font-bold">Assinatura Diretoria</p>
-          </div>
-        </div>
-      </div>
-    )
-  });
-
-  const pages: Block[][] = [];
-  let currentPage: Block[] = [];
-  let currentHeight = 0;
-
-  blocks.forEach(block => {
-    if (currentHeight + block.height > A4_CONTENT_HEIGHT && currentPage.length > 0) {
-      pages.push(currentPage);
-      currentPage = [block];
-      currentHeight = block.height;
-    } else {
-      currentPage.push(block);
-      currentHeight += block.height;
-    }
-  });
-  if (currentPage.length > 0) {
-    pages.push(currentPage);
-  }
-
-  return (
-    <div className="flex-1 flex flex-col h-full bg-slate-950">
       {/* Toolbar */}
-      <div className="h-14 border-b border-slate-800 bg-slate-900 flex items-center justify-between px-4 shrink-0">
-        <button 
-          onClick={onBack}
-          className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-sm font-medium"
-        >
-          <ChevronLeft className="w-4 h-4" />
-          Voltar ao Formulário
-        </button>
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={exportCover}
-            disabled={isExporting || !sealBase64}
-            className="flex items-center gap-2 bg-amber-700 hover:bg-amber-600 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            <ImageIcon className="w-4 h-4" />
-            Salvar Capa
+      <div className="h-14 bg-slate-800 flex items-center justify-between px-4 shrink-0 border-b border-slate-700">
+        <div className="flex items-center gap-2">
+          <div className="text-sm font-bold text-slate-300 mr-4">DADOS DE CAPA:</div>
+          <input type="text" placeholder="Op. Name" value={metadata.operationName} onChange={e => handleMetadataChange('operationName', e.target.value)} className="w-32 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+          <input type="text" placeholder="Directive" value={metadata.directiveNo} onChange={e => handleMetadataChange('directiveNo', e.target.value)} className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+          <input type="text" placeholder="Agent" value={metadata.agentName} onChange={e => handleMetadataChange('agentName', e.target.value)} className="w-32 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button onClick={gerarLink} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors">
+             {linkGerado ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4" />}
+             {linkGerado ? 'Link Copiado!' : 'Copiar Link / Salvar'}
           </button>
-          <button 
-            onClick={exportDocumentPages}
-            disabled={isExporting || !sealBase64}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
-          >
+          <button onClick={exportDocument} disabled={isExporting} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm transition-colors disabled:opacity-50">
             <Download className="w-4 h-4" />
-            Salvar Documento
+            {isExporting ? 'Exportando...' : 'Exportar Tudo'}
           </button>
         </div>
       </div>
 
-      {/* Preview Area */}
-      <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-slate-950">
-        
-        {/* Cover Container */}
-        <div className="flex flex-col items-center mb-16">
-          <div 
-            ref={coverRef}
-            className="relative w-[880px] h-[1200px] shrink-0 flex items-center justify-center overflow-hidden"
-            style={{ backgroundColor: '#c29b6c' }}
-          >
-            {/* Content */}
-            <div className="relative z-10 flex flex-col items-center w-full px-24">
-              {coverSealBase64 ? (
-                <img src={coverSealBase64} alt="FIB Seal" className="w-64 h-64 object-contain mb-16 opacity-90" />
-              ) : (
-                <div className="w-64 h-64 bg-black/10 rounded-full mb-16" />
-              )}
-              
-              <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center">
-                FEDERAL INVESTIGATION BUREAU
-              </h1>
-              <div className="w-full h-1 bg-black/60 mb-2"></div>
-              <div className="w-full h-0.5 bg-black/40 mb-16"></div>
-
-              <h2 className="text-3xl font-bold text-black/80 tracking-widest text-center mb-8 uppercase">
-                {formData.classification || 'RELATÓRIO DE INVESTIGAÇÃO'}
-              </h2>
-              
-              <div className="w-full max-w-2xl space-y-6">
-                <div className="flex items-end gap-4">
-                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Directive No.:</span>
-                  <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">
-                    {formData.directiveNo}
-                  </div>
-                </div>
-                <div className="flex items-end gap-4">
-                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Operation:</span>
-                  <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2 truncate">
-                    {formData.operationName || '[NOME DA OPERAÇÃO]'}
-                  </div>
-                </div>
-                <div className="flex items-end gap-4">
-                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Issue Date:</span>
-                  <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">
-                    {formData.issueDate}
-                  </div>
-                </div>
-                <div className="flex items-end gap-4">
-                  <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Agent:</span>
-                  <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">
-                    {formData.agentName}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Document Container */}
-        <div 
-          ref={docRef} 
-          className="flex flex-col gap-12 items-center pb-16 pt-8"
-          style={{ backgroundColor: 'transparent' }}
-        >
-          {pages.map((pageBlocks, pageIndex) => (
-            <div 
-              key={pageIndex}
-              className="document-page relative w-[880px] h-[1200px] shrink-0 flex items-center justify-center"
-            >
-              {/* Folder Background (Open Folder Look) */}
-              <div 
-                className="absolute inset-0 shadow-2xl"
-                style={{ backgroundColor: '#d4b082' }}
-              >
-                <div className="absolute inset-0 opacity-20 mix-blend-multiply pointer-events-none" style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`
-                }}></div>
-              </div>
-
-              {/* Paper */}
-              <div className="relative w-[794px] h-[1123px] bg-white shadow-xl flex flex-col">
-                {/* Watermark */}
-                {watermarkBase64 && (
-                  <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none overflow-hidden">
-                    <img src={watermarkBase64} alt="" className="w-[600px] h-[600px] object-contain grayscale" />
-                  </div>
+      {/* Editor Main Canvas */}
+      <div 
+        className="flex-1 overflow-y-auto bg-slate-950 p-8 custom-scrollbar"
+        onClick={() => setSelectedElement(null)}
+      >
+        <div className="flex flex-col items-center gap-16 pb-32">
+          
+          {/* COVER PAGE */}
+          <div ref={coverRef} className="relative w-[880px] h-[1200px] shrink-0 flex items-center justify-center overflow-hidden shadow-2xl" style={{ backgroundColor: '#c29b6c' }}>
+             <div className="relative z-10 flex flex-col items-center w-full px-24">
+                {sealBase64 ? (
+                  <img src={sealBase64} alt="FIB Seal" className="w-64 h-64 object-contain mb-16 opacity-90" />
+                ) : (
+                  <div className="w-64 h-64 bg-black/10 rounded-full mb-16" />
                 )}
                 
-                {/* Content */}
-                <div className="flex-1 px-16 py-16 flex flex-col relative z-10 text-black">
-                  {pageBlocks.map(block => block.render())}
+                <input 
+                  type="text" 
+                  value="FEDERAL INVESTIGATION BUREAU" 
+                  disabled 
+                  className="w-full text-[30px] font-serif font-bold text-black/80 tracking-widest mb-4 text-center bg-transparent outline-none" 
+                />
+                
+                <div className="w-full h-1 bg-black/60 mb-2"></div>
+                <div className="w-full h-0.5 bg-black/40 mb-16"></div>
+
+                <input 
+                  type="text" 
+                  value={metadata.classification} 
+                  onChange={e => handleMetadataChange('classification', e.target.value)}
+                  className="w-full text-3xl font-bold text-black/80 tracking-widest text-center mb-8 uppercase bg-transparent outline-none focus:bg-white/10 p-2 rounded" 
+                />
+                
+                <div className="w-full max-w-2xl space-y-6">
+                  <div className="flex items-end gap-4">
+                    <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Directive No.:</span>
+                    <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">{metadata.directiveNo || '---'}</div>
+                  </div>
+                  <div className="flex items-end gap-4">
+                    <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Operation:</span>
+                    <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2 truncate">{metadata.operationName || '---'}</div>
+                  </div>
+                  <div className="flex items-end gap-4">
+                    <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Issue Date:</span>
+                    <input type="date" value={metadata.issueDate} onChange={e => handleMetadataChange('issueDate', e.target.value)} className="bg-transparent border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 outline-none w-48" />
+                  </div>
+                  <div className="flex items-end gap-4">
+                    <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Agent:</span>
+                    <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">{metadata.agentName || '---'}</div>
+                  </div>
+                </div>
+             </div>
+          </div>
+
+          <div ref={docRef} className="flex flex-col gap-16 items-center w-full">
+            {pages.map((page, index) => (
+              <div key={page.id} className="relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
+                {/* TOOLBAR FOR THIS PAGE */}
+                {!isSignedMode && (
+                  <div className="absolute -left-16 top-10 flex flex-col gap-2">
+                     <button onClick={() => addElement(page.id, 'text')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow relative group" title="Adicionar Bloco de Texto">
+                       <Type className="w-5 h-5"/>
+                     </button>
+                     <button onClick={() => handleImageUpload(page.id)} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow" title="Adicionar Imagem">
+                       <ImageIcon className="w-5 h-5"/>
+                     </button>
+                     <div className="w-full h-px bg-slate-700 my-1"></div>
+                     <button onClick={() => addElement(page.id, 'circle')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-red-500 shadow" title="Adicionar Círculo (Marcação)">
+                       <Circle className="w-5 h-5"/>
+                     </button>
+                     <button onClick={() => addElement(page.id, 'rect')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-red-500 shadow" title="Adicionar Quadrado (Marcação)">
+                       <Square className="w-5 h-5"/>
+                     </button>
+                     <button onClick={() => addElement(page.id, 'cross')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-red-500 shadow" title="Adicionar Cruz/X">
+                       <X className="w-5 h-5"/>
+                     </button>
+                     <div className="w-full h-px bg-slate-700 my-1"></div>
+                     <button onClick={() => addElement(page.id, 'stamp')} className="p-2 w-full flex justify-center bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow" title="Adicionar Carimbo">
+                       <span className="text-xs font-bold font-serif px-1 border-2 border-slate-300 rounded-sm italic">C</span>
+                     </button>
+                     <button onClick={() => deletePage(page.id)} className="p-2 bg-red-900/50 text-red-300 rounded hover:bg-red-800 hover:text-white shadow mt-4" title="Excluir Página">
+                       <Trash className="w-5 h-5"/>
+                     </button>
+                  </div>
+                )}
+
+                <div className="absolute inset-0 shadow-2xl" style={{ backgroundColor: '#d4b082' }}>
+                  <div className="absolute inset-0 opacity-20 mix-blend-multiply pointer-events-none" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`}}></div>
                 </div>
 
-                {/* Footer */}
-                <div className="h-16 border-t border-black/20 mx-16 flex items-center justify-between text-xs text-black/50 font-mono relative z-10">
-                  <span>F.I.B - CONFIDENTIAL</span>
-                  <span>Page {pageIndex + 1} of {pages.length}</span>
-                  <span>{formData.directiveNo || 'UNREGISTERED'}</span>
+                {/* PAPER */}
+                <div className="document-page relative w-[794px] h-[1123px] bg-white shadow-xl flex flex-col z-10 overflow-hidden">
+                  {sealBase64 && (
+                    <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none overflow-hidden z-0">
+                      <img src={sealBase64} alt="" className="w-[600px] h-[600px] object-contain grayscale" />
+                    </div>
+                  )}
+
+                  {/* Header */}
+                  <div className="h-32 px-16 pt-12 shrink-0 flex items-start justify-between border-b-2 border-black/80 z-0">
+                    {sealBase64 && <img src={sealBase64} alt="FIB" className="w-16 h-16 object-contain" />}
+                    <h2 className="text-xl font-bold font-serif tracking-wider text-black/90">FEDERAL INVESTIGATION BUREAU</h2>
+                  </div>
+
+                  {/* Content Canvas */}
+                  <div className="flex-1 relative mx-2 z-20">
+                    {page.elements.map(el => (
+                      <DraggableElement 
+                        key={el.id} 
+                        el={el} 
+                        selected={selectedElement === el.id}
+                        onSelect={() => setSelectedElement(el.id)}
+                        onChange={(updates) => updateElement(page.id, el.id, updates)}
+                        onDelete={() => deleteElement(page.id, el.id)}
+                        onMoveToNextPage={() => moveElementToNextPage(index, el.id)}
+                        readOnly={isSignedMode}
+                      />
+                    ))}
+
+                    {/* Footer Signature Area on Last Page ONLY */}
+                    {index === pages.length - 1 && (
+                       <div className="absolute bottom-10 w-full flex justify-between px-16 z-0">
+                         <div className="text-center w-56 relative z-0">
+                           {metadata.agenteAssinatura && <div className="absolute bottom-6 w-full text-center pointer-events-none"><span className="font-signature text-4xl text-[#0000a0] -rotate-2 opacity-90">{metadata.agenteAssinatura}</span></div>}
+                           <div className="border-b border-black mb-2"></div>
+                           <p className="text-sm font-bold text-black border-none bg-transparent m-0 p-0">Assinatura do Agente</p>
+                           {!isSignedMode && !metadata.agenteAssinatura && !isDiretorMode && (
+                              <input type="text" placeholder="Assinar (Nome)" className="w-full mt-2 text-xs border rounded px-1 py-1 bg-white/50" onBlur={(e) => handleMetadataChange('agenteAssinatura', e.target.value)} />
+                           )}
+                         </div>
+                         <div className="text-center w-56 relative z-0">
+                           {metadata.diretorAssinatura && <div className="absolute bottom-6 w-full text-center pointer-events-none"><span className="font-signature text-5xl text-black -rotate-2 opacity-90">{metadata.diretorAssinatura}</span></div>}
+                           <div className="border-b border-black mb-2"></div>
+                           <p className="text-sm font-bold text-black border-none bg-transparent m-0 p-0">Assinatura Diretoria</p>
+                           {!isSignedMode && isDiretorMode && !metadata.diretorAssinatura && (
+                              <input type="text" placeholder="Assinar Diretoria" className="w-full mt-2 text-xs border rounded px-1 py-1 bg-white/50" onBlur={(e) => handleMetadataChange('diretorAssinatura', e.target.value)} />
+                           )}
+                         </div>
+                       </div>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  <div className="h-16 shrink-0 border-t border-black/20 mx-16 flex items-center justify-between text-xs text-black/50 font-mono z-0">
+                    <span>F.I.B - CONFIDENTIAL</span>
+                    <span>Page {index + 1} of {pages.length}</span>
+                    <span>{metadata.directiveNo || 'UNREGISTERED'}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+
+            {!isSignedMode && (
+              <button onClick={addPage} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-full shadow-lg transition-all hover:scale-105">
+                 <PlusCircle className="w-5 h-5" />
+                 Adicionar Nova Página
+              </button>
+            )}
+
+          </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
