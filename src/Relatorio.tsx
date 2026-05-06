@@ -57,16 +57,14 @@ const DEFAULT_METADATA: RelatorioMetadata = {
 };
 
 function migrateLegacyData(legacy: any): EditorPage[] {
-  const pages: EditorPage[] = [];
-
-  // Page 1
+  const pages: EditorPage[] = []  // Page 1
   pages.push({
     id: uuidv4(),
     elements: [
-      { id: uuidv4(), type: 'text', x: 64, y: 120, width: 660, height: 150, content: '1. OBJETIVO DA INVESTIGAÇÃO\n\n' + (legacy.objetivo || ''), fontWeight: 'normal', fontSize: 12 },
-      { id: uuidv4(), type: 'text', x: 64, y: 300, width: 660, height: 150, content: '2. ORGANIZAÇÃO INVESTIGADA\n\n' + (legacy.organizacao || ''), fontSize: 12 },
-      { id: uuidv4(), type: 'text', x: 64, y: 500, width: 660, height: 250, content: '3. HISTÓRICO DE OCORRÊNCIAS\n\n' + (legacy.historico || ''), fontSize: 12 },
-      { id: uuidv4(), type: 'text', x: 64, y: 800, width: 660, height: 150, content: '4. ANÁLISE DE PADRÃO CRIMINAL\n\n' + (legacy.analise || ''), fontSize: 12 }
+      { id: uuidv4(), type: 'text', x: 64, y: 120, width: 660, height: 150, content: '1. OBJETIVO DA INVESTIGAÇÃO\n\n Definir de forma clara o propósito da investigação. Deve indicar quais crimes ou atividades estão sendo apuradas e qual o resultado esperado, ex: coleta de provas, identificação de membros, desarticulação da organização.\n' + (legacy.objetivo || ''), fontWeight: 'normal', fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 300, width: 660, height: 150, content: '2. ORGANIZAÇÃO INVESTIGADA\n\n Detalhamento do grupo investigado. Inclui nome, natureza da organização, área de atuação e características estruturais que indiquem organização criminosa (hierarquia, divisão de funções, atuação coordenada).' + (legacy.organizacao || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 500, width: 660, height: 250, content: '3. HISTÓRICO DE OCORRÊNCIAS\n\n Registro cronológico de todas as ocorrências relacionadas aos alvos ou à organização. Serve para demonstrar padrão de comportamento, reincidência e evolução da atividade criminosa.' + (legacy.historico || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 800, width: 660, height: 150, content: '4. ANÁLISE DE PADRÃO CRIMINAL\n\n Seção analítica onde irá interpretar os dados coletados. Aqui se identificam padrões, conexões entre indivíduos, frequência de crimes e possível escalada de violência ou organização.' + (legacy.analise || ''), fontSize: 12 }
     ]
   });
 
@@ -74,10 +72,18 @@ function migrateLegacyData(legacy: any): EditorPage[] {
   pages.push({
     id: uuidv4(),
     elements: [
-      { id: uuidv4(), type: 'text', x: 64, y: 120, width: 660, height: 200, content: '5. INTELIGÊNCIA COLETADA\n\n' + (legacy.inteligencia || ''), fontSize: 12 },
-      { id: uuidv4(), type: 'text', x: 64, y: 350, width: 660, height: 150, content: '6. FUNDAMENTAÇÃO LEGAL\n\n' + (legacy.fundamentacao || ''), fontSize: 12 },
-      { id: uuidv4(), type: 'text', x: 64, y: 550, width: 660, height: 150, content: '7. MEDIDAS OPERACIONAIS ATIVAS\n\n' + (legacy.medidas || ''), fontSize: 12 },
-      { id: uuidv4(), type: 'text', x: 64, y: 750, width: 660, height: 150, content: '8. CONCLUSÃO\n\n' + (legacy.conclusao || ''), fontSize: 12 }
+      { id: uuidv4(), type: 'text', x: 64, y: 120, width: 660, height: 200, content: '5. INTELIGÊNCIA COLETADA\n\n Resumo dos métodos e informações obtidas durante a investigação, como vigilância, registros, relatórios e outras formas de coleta. Não precisa expor tudo, mas deve justificar a base informacional do caso.' + (legacy.inteligencia || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 350, width: 660, height: 150, content: '6. FUNDAMENTAÇÃO LEGAL\n\n Base legal que sustenta a investigação e possíveis medidas futuras. Deve indicar quais crimes ou enquadramentos jurídicos se aplicam, especialmente em casos de organização criminosa estruturada.' + (legacy.fundamentacao || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 550, width: 660, height: 150, content: '7. MEDIDAS OPERACIONAIS ATIVAS\n\n Lista das ações já autorizadas no âmbito do protocolo ativo, como abordagens, monitoramento e preparação para operações maiores, se houverem. Define o que os agentes podem ou não fazer naquele momento.' + (legacy.medidas || ''), fontSize: 12 },
+      { id: uuidv4(), type: 'text', x: 64, y: 750, width: 660, height: 150, content: '8. CONCLUSÃO\n\n Síntese final da investigação até o momento. Deve indicar se há elementos suficientes para avançar (ex: raid, mandado) ou se a investigação precisa continuar.' + (legacy.conclusao || ''), fontSize: 12 }
+    ]
+  });
+
+  // Page 3 (Signature Page)
+  pages.push({
+    id: uuidv4(),
+    elements: [
+       { id: uuidv4(), type: 'text', x: 64, y: 120, width: 660, height: 400, content: '9. DECLARAÇÃO FINAL\n\n “Declaro, sob responsabilidade funcional e na observância dos princípios constitucionais de legalidade, devido processo legal e proteção de direitos individuais, que as informações constantes neste relatório correspondem fielmente aos fatos apurados durante o período indicado, estando em conformidade com as diretrizes operacionais da Divisão de Inteligência e Fiscalização de Investigações da Federal Investigation Bureau, bem como com os procedimentos previstos no Standard Operating Procedures da Agência e nas normas legais aplicáveis aos procedimentos investigativos federais.”\n\n\n\n Data:', fontSize: 12 }
     ]
   });
 
@@ -575,17 +581,36 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     setPages(prev => prev.map(p => {
       if (p.id === pageId) {
         const oldEl = p.elements.find(e => e.id === elId);
+        if (!oldEl) return p;
+        
         let newElements = p.elements.map(el => el.id === elId ? { ...el, ...updates } : el);
         
-        // Auto-push layout logic: If height grows, push elements below it downwards
-        if (updates.height !== undefined && oldEl && updates.height > oldEl.height) {
-           const dy = updates.height - oldEl.height;
-           newElements = newElements.map(e => {
-              if (e.id !== elId && e.y >= oldEl.y + oldEl.height - 20) {
-                 return { ...e, y: e.y + dy };
-              }
-              return e;
-           });
+        // Auto-push layout logic: If height grows or Y moves, check for overlaps and push elements down
+        const isPushAction = (updates.height !== undefined && updates.height > oldEl.height) || 
+                            (updates.y !== undefined && updates.y !== oldEl.y);
+
+        if (isPushAction) {
+           // Basic constraint logic to avoid overwriting
+           let changed = true;
+           let iter = 0;
+           while (changed && iter < 10) {
+             changed = false;
+             iter++;
+             for (let i = 0; i < newElements.length; i++) {
+               for (let j = 0; j < newElements.length; j++) {
+                 if (i === j) continue;
+                 const top = newElements[i];
+                 const bottom = newElements[j];
+                 
+                 // If 'top' overlaps 'bottom' vertically, push 'bottom' further down
+                 // We only push if top is actually above or at the same level as bottom
+                 if (top.y <= bottom.y && (top.y + top.height + 15) > bottom.y) {
+                    bottom.y = top.y + top.height + 15;
+                    changed = true;
+                 }
+               }
+             }
+           }
         }
         
         return { ...p, elements: newElements };
@@ -601,11 +626,19 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
       const elIndex = sourcePage.elements.findIndex(e => e.id === elId);
       if (elIndex === -1) return prev;
       
-      const elToMove = { ...sourcePage.elements[elIndex], y: 150 };
+      const elToMove = { ...sourcePage.elements[elIndex], y: 120 };
       sourcePage.elements.splice(elIndex, 1);
       
       if (pageIndex + 1 < newPages.length) {
-        newPages[pageIndex + 1].elements.push(elToMove);
+        const targetPage = newPages[pageIndex + 1];
+        // Find highest occupied spot to avoid overlap
+        let startY = 120;
+        targetPage.elements.forEach(e => {
+           if (e.y + e.height > startY) {
+              startY = e.y + e.height + 25;
+           }
+        });
+        targetPage.elements.push({ ...elToMove, y: startY });
       } else {
         newPages.push({ id: uuidv4(), elements: [elToMove] });
       }
