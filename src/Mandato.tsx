@@ -6,7 +6,6 @@ import { Rnd } from 'react-rnd';
 import { collection, query, where, getDocs, addDoc, serverTimestamp, arrayUnion, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { useAuth, UserProfile, OperationType, handleFirestoreError } from './contexts/AuthContext';
-import { QUICK_USERS } from './constants';
 
 export type MandadoData = {
   directiveNo: string;
@@ -364,26 +363,9 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
         // We log the error but don't show to user yet, fallback to mock
       }
 
-      // 2. Add Quick Users for testing (if they match roles)
-      const mockJudges = QUICK_USERS
-        .filter(u => ['judge', 'doj'].includes(u.role))
-        .map(u => ({
-          uid: u.id,
-          displayName: u.displayName,
-          email: `${u.username}@sistema.local`,
-          role: u.role,
-          status: 'active'
-        } as UserProfile));
-
-      // 3. Merge and remove duplicates (by uid)
+      // 3. Keep only firestore results
       const combined = [...firestoreJudges];
-      mockJudges.forEach(mj => {
-        if (!combined.find(cj => cj.uid === mj.uid)) {
-          combined.push(mj);
-        }
-      });
-
-      console.log(`Mandato: Encontrados ${combined.length} magistrados (Real: ${firestoreJudges.length}, Mock: ${mockJudges.length}).`);
+      console.log(`Mandato: Encontrados ${combined.length} magistrados.`);
       setJudges(combined);
     } catch (error) {
       console.error("Erro ao buscar juízes:", error);
@@ -993,8 +975,8 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
   };
 
   // --- Pagination Logic ---
-  const A4_PAGE_HEIGHT = 920; // Visible pixels on A4 paper before we should consider a new page
-  const charsPerLine = 90;
+  const A4_PAGE_HEIGHT = 920; 
+  const charsPerLine = 85; 
   
   type Block = {
     id: string;
@@ -1080,7 +1062,7 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
   allBlocks.push({
     id: 'base_legal',
     height: Math.max(180, resumoHeight),
-    forceNewPage: true,
+    forceNewPage: true, // Começa na 3ª folha (Doc P2)
     render: () => (
       <section key="base_legal" className="mb-8">
         <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">3. BASE LEGAL E CAUSA PROVÁVEL</h3>
@@ -1141,7 +1123,7 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
   allBlocks.push({
     id: 'declaracao',
     height: 160,
-    forceNewPage: true,
+    forceNewPage: false, // Junta-se à 3ª folha (Doc P2)
     render: () => (
       <section key="declaracao" className="mb-10">
         <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">5. DECLARAÇÃO DO REQUERENTE</h3>
@@ -1246,10 +1228,10 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
             <p className="text-xs font-black uppercase tracking-widest text-black/80">Agente Requerente</p>
             <p className="text-[10px] text-black/40 font-mono mt-0.5">{formData.requerenteRank || 'FEDERAL AGENT'}</p>
           </div>
-          <div className="text-center w-64 relative group">
+          <div className="text-center w-72 relative group">
             {formData.juizAssinatura && (
               <div className="absolute bottom-8 w-full text-center pointer-events-none transition-transform group-hover:scale-105">
-                <span className="font-signature text-4xl text-black -rotate-1 inline-block whitespace-nowrap">
+                <span className="font-signature text-3xl text-black -rotate-1 inline-block whitespace-nowrap">
                   {formData.juizAssinatura}
                 </span>
               </div>

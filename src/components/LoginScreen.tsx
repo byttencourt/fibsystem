@@ -145,7 +145,7 @@ export function LoginScreen() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full h-11 bg-slate-800/50 border border-white/5 rounded-xl px-10 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500/50 transition-colors"
-                placeholder={isRegistering ? "nome@email.gov" : "Ex: seunome@email.gov"}
+                placeholder={isRegistering ? "nome@email.gov" : "Ex: seunomer@email.gov"}
               />
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             </div>
