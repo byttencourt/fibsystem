@@ -589,7 +589,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
         const isPushAction = (updates.height !== undefined && updates.height > oldEl.height) || 
                             (updates.y !== undefined && updates.y !== oldEl.y);
 
-        if (isPushAction) {
+        if (isPushAction && oldEl.type === 'text') {
            // Basic constraint logic to avoid overwriting
            let changed = true;
            let iter = 0;
@@ -601,6 +601,10 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                  if (i === j) continue;
                  const top = newElements[i];
                  const bottom = newElements[j];
+
+                 // Only text elements push other text elements. 
+                 // Overlays (images, stamps, etc) should allow overlap.
+                 if (top.type !== 'text' || bottom.type !== 'text') continue;
                  
                  // If 'top' overlaps 'bottom' vertically, push 'bottom' further down
                  // We only push if top is actually above or at the same level as bottom
@@ -631,13 +635,15 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
       
       if (pageIndex + 1 < newPages.length) {
         const targetPage = newPages[pageIndex + 1];
-        // Find highest occupied spot to avoid overlap
+        // Find highest occupied spot to avoid overlap (only for text)
         let startY = 120;
-        targetPage.elements.forEach(e => {
-           if (e.y + e.height > startY) {
-              startY = e.y + e.height + 25;
-           }
-        });
+        if (elToMove.type === 'text') {
+          targetPage.elements.forEach(e => {
+             if (e.type === 'text' && e.y + e.height > startY) {
+                startY = e.y + e.height + 25;
+             }
+          });
+        }
         targetPage.elements.push({ ...elToMove, y: startY });
       } else {
         newPages.push({ id: uuidv4(), elements: [elToMove] });
