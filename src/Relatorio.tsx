@@ -3,11 +3,17 @@ import { motion } from 'motion/react';
 import { 
   ChevronLeft, Download, Image as ImageIcon, Type, Save, Square,
   Trash2, Check, Copy, FileText, Maximize2, Minimize2, X, PlusCircle, Trash,
-  Circle, Minus, ArrowDownToLine, MoveUpRight, PenTool, Highlighter
+  Circle, Minus, ArrowDownToLine, MoveUpRight, PenTool, Highlighter, Loader2
 } from 'lucide-react';
 import { toBlob } from 'html-to-image';
 import { Rnd } from 'react-rnd';
 import { v4 as uuidv4 } from 'uuid';
+import { useAuth, OperationType, handleFirestoreError } from './contexts/AuthContext';
+import { db } from './lib/firebase';
+import { 
+  collection, addDoc, updateDoc, doc, getDoc, 
+  serverTimestamp, onSnapshot 
+} from 'firebase/firestore';
 
 export type ElementType = 'text' | 'image' | 'stamp' | 'circle' | 'arrow' | 'cross' | 'drawing' | 'redact';
 
@@ -338,7 +344,8 @@ function DraggableElement({
   );
 }
 
-export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }: { isMaximized: boolean, onClose: () => void, onMinimize: () => void, onMaximize: () => void }) {
+export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, onFocus, zIndex }: { isMaximized: boolean, onClose: () => void, onMinimize: () => void, onMaximize: () => void, onFocus?: () => void, zIndex?: number }) {
+  const { profile, user } = useAuth();
   const [metadata, setMetadata] = useState<RelatorioMetadata>(DEFAULT_METADATA);
   const [pages, setPages] = useState<EditorPage[]>([]);
   const [coverElements, setCoverElements] = useState<ReportElement[]>([]);
@@ -347,17 +354,122 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
   
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [reportId, setReportId] = useState<string | null>(null);
   
   const [sealBase64, setSealBase64] = useState<string>('');
   const docRef = useRef<HTMLDivElement>(null);
   const coverRef = useRef<HTMLDivElement>(null);
-  const [linkGerado, setLinkGerado] = useState(false);
+  const [salvando, setSalvando] = useState(false);
   
   const [drawMode, setDrawMode] = useState(false);
   const [activeDrawPage, setActiveDrawPage] = useState<string | null>(null);
   const [currentPathPoints, setCurrentPathPoints] = useState<{x:number, y:number}[]>([]);
 
+  const isMagistrateRole = (role?: string) => {
+    if (!role) return false;
+    const r = role.toLowerCase();
+    const magistrateRoles = [
+      'judge', 'juiz', 'doj', 'magistrado', 'magistrada', 'promotor', 'promotora', 
+      'diretoria', 'diretor', 'diretora', 'procurador', 'procuradora', 'juiza', 'juíza',
+      'tribunal', 'desembargador', 'desembargadora', 'procuradoria', 'justiça', 'justica'
+    ];
+    return magistrateRoles.includes(r);
+  };
+
+  const loadReport = async (id: string) => {
+    setLoading(true);
+    setReportId(id);
+    try {
+      console.log(`Relatorio: Carregando documento ID: ${id}`);
+      const docSnap = await getDoc(doc(db, 'reports', id));
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        console.log("Relatorio: Dados recuperados:", data);
+        
+        setMetadata(data.metadata || DEFAULT_METADATA);
+        
+        if (!data.pages || data.pages.length === 0) {
+           // Might be legacy format
+           if (data.objetivo || data.historico || data.conclusao) {
+             console.log("Relatorio: Detectado formato legado, migrando...");
+             setPages(migrateLegacyData(data));
+           } else {
+             setPages([]);
+           }
+        } else {
+           setPages(data.pages);
+        }
+        
+        setCoverElements(data.coverElements || []);
+        
+        // Verifica se é um magistrado abrindo
+        if (profile && isMagistrateRole(profile.role)) {
+           console.log("Relatorio: Abrindo no modo revisão (Magistrado)");
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `reports/${id}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveReport = async () => {
+    if (!user) return;
+    setSalvando(true);
+    try {
+      const reportData: any = {
+        metadata,
+        pages,
+        coverElements,
+        title: metadata.operationName || 'Relatório sem Título',
+        updatedAt: serverTimestamp()
+      };
+
+      if (reportId) {
+        // Se estamos editando, não enviamos o ownerId para não violar regras de segurança
+        // se o usuário atual for um juiz (membro de sharedWith).
+        await updateDoc(doc(db, 'reports', reportId), reportData);
+      } else {
+        // Novo relatório
+        await addDoc(collection(db, 'reports'), {
+          ...reportData,
+          ownerId: user.uid,
+          createdAt: serverTimestamp(),
+          sharedWith: []
+        });
+      }
+      alert('Relatório salvo com sucesso!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'reports');
+    } finally {
+      setSalvando(false);
+    }
+  };
+
   useEffect(() => {
+    // Listen for custom open event
+    const handleOpenReport = (e: any) => {
+      const detail = e.detail;
+      const id = typeof detail === 'string' ? detail : detail?.id;
+      console.log("Relatorio: Evento open-report recebido", { id, detail });
+      if (id) loadReport(id);
+    };
+    window.addEventListener('open-report', handleOpenReport);
+    return () => window.removeEventListener('open-report', handleOpenReport);
+  }, [profile, loadReport]); // Adicionado dependency loadReport e profile
+
+  useEffect(() => {
+    // Check for pending report from global state (attachments)
+    const pending = (window as any).pendingReport;
+    if (pending) {
+      console.log("Relatorio: Carregando pendente do estado global:", pending);
+      delete (window as any).pendingReport;
+      loadReport(pending.id);
+      return;
+    }
+
     const fetchLocalImage = async () => {
       try {
         const logoUrl = '/logo.png';
@@ -372,50 +484,19 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
       } catch (e) { console.error(e); }
     };
     fetchLocalImage();
-
-    const params = new URLSearchParams(window.location.search);
-    const dataParam = params.get('data');
-    if (dataParam) {
-      try {
-        const decoded = JSON.parse(decodeURIComponent(atob(dataParam)));
-        
-        if (decoded.pages) {
-          setPages(decoded.pages);
-          setMetadata({
-            directiveNo: decoded.directiveNo,
-            operationName: decoded.operationName,
-            issueDate: decoded.issueDate,
-            agentName: decoded.agentName,
-            classification: decoded.classification,
-            agenteAssinatura: decoded.agenteAssinatura,
-            diretorAssinatura: decoded.diretorAssinatura
-          });
-        } else if (Object.keys(decoded).length > 0) {
-          // Legacy payload
-          setMetadata({
-            directiveNo: decoded.directiveNo || '',
-            operationName: decoded.nomeOperacao || '',
-            issueDate: decoded.dataSolicitacao || new Date().toISOString().split('T')[0],
-            agentName: decoded.requerenteBadge || '',
-            classification: decoded.classification || 'RELATÓRIO DE INVESTIGAÇÃO',
-            agenteAssinatura: decoded.agenteAssinatura,
-            diretorAssinatura: decoded.diretorAssinatura
-          });
-          setPages(migrateLegacyData(decoded));
-        } else {
-          setPages(migrateLegacyData({}));
-        }
-
-        if (decoded.diretorAssinatura) setIsSignedMode(true);
-        if (params.get('mode') === 'diretor' && !decoded.diretorAssinatura) setIsDiretorMode(true);
-      } catch (e) {
-        console.error("Erro ao carregar dados", e);
-        setPages(migrateLegacyData({}));
-      }
-    } else {
+    
+    // Default to a blank report if not loading one
+    if (!reportId && pages.length === 0) {
       setPages(migrateLegacyData({}));
+      setMetadata(prev => ({ 
+        ...prev, 
+        agentName: profile?.displayName || '',
+        classification: profile?.role === 'judge' ? 'SENTENÇA JUDICIAL' : 
+                         profile?.role === 'lspd' ? 'RELATÓRIO DE OCORRÊNCIA' : 
+                         'RELATÓRIO DE INVESTIGAÇÃO'
+      }));
     }
-  }, []);
+  }, [profile]);
 
   const handleMetadataChange = (key: keyof RelatorioMetadata, value: string) => {
     setMetadata(prev => ({ ...prev, [key]: value }));
@@ -572,14 +653,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
     }
   };
 
-  const gerarLink = () => {
-    const dataString = btoa(encodeURIComponent(JSON.stringify({ ...metadata, pages })));
-    const url = `${window.location.origin}${window.location.pathname}?data=${dataString}&mode=agente`;
-    navigator.clipboard.writeText(url);
-    setLinkGerado(true);
-    setTimeout(() => setLinkGerado(false), 3000);
-  };
-
   const exportSingleImage = async (element: HTMLElement, filename: string, bgColor: string = 'rgba(0,0,0,0)') => {
     const blob = await toBlob(element, { pixelRatio: 2, backgroundColor: bgColor });
     if (!blob) throw new Error('Falha ao gerar');
@@ -605,9 +678,9 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
       await exportSingleImage(coverRef.current, `1_Capa_${metadata.directiveNo || 'Relatorio'}.png`, '#c29b6c');
       await new Promise(r => setTimeout(r, 500));
       
-      const pageElements = docRef.current.querySelectorAll('.document-page');
-      for (let i = 0; i < pageElements.length; i++) {
-        await exportSingleImage(pageElements[i] as HTMLElement, `${i + 2}_Pagina_${i + 1}_${metadata.directiveNo || 'Relatorio'}.png`);
+      const pageContainers = docRef.current.querySelectorAll('.page-export-container');
+      for (let i = 0; i < pageContainers.length; i++) {
+        await exportSingleImage(pageContainers[i] as HTMLElement, `${i + 2}_Pagina_${i + 1}_${metadata.directiveNo || 'Relatorio'}.png`, '#d4b082');
         await new Promise(res => setTimeout(res, 500));
       }
     } catch (err) {
@@ -619,36 +692,51 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.95, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95, y: 20 }}
-      transition={{ duration: 0.2 }}
-      className={`absolute bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col z-50 pointer-events-auto transition-all duration-200 ${
-        isMaximized 
-          ? 'inset-0 rounded-none' 
-          : 'inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[1200px] md:h-[800px] rounded-lg'
-      }`}
-      onClick={() => setSelectedElement(null)}
+    <Rnd
+      default={{
+        x: window.innerWidth / 2 - 600,
+        y: 40,
+        width: 1200,
+        height: 800,
+      }}
+      size={isMaximized ? { width: '100vw', height: '100vh' } : undefined}
+      position={isMaximized ? { x: 0, y: 0 } : undefined}
+      disableDragging={isMaximized}
+      enableResizing={!isMaximized}
+      dragHandleClassName="handle-drag"
+      bounds="window"
+      className="pointer-events-auto"
+      onMouseDown={onFocus}
+      style={{ zIndex }}
     >
-      {/* App Titlebar */}
-      <div className="h-10 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-3 select-none" onDoubleClick={onMaximize}>
-        <div className="flex items-center gap-2 text-slate-300">
-          <img src="https://kappa.lol/TkFgCM" alt="Icon" className="w-5 h-5 rounded-sm" referrerPolicy="no-referrer" />
-          <span className="text-sm font-medium">F.I.B - Sistema de Relatórios</span>
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        transition={{ duration: 0.2 }}
+        className={`bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col transition-all duration-200 w-full h-full ${
+          isMaximized ? 'rounded-none' : 'rounded-lg'
+        }`}
+        onClick={() => setSelectedElement(null)}
+      >
+        {/* App Titlebar */}
+        <div className="h-10 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-3 select-none handle-drag" onDoubleClick={onMaximize}>
+          <div className="flex items-center gap-2 text-slate-300 pointer-events-none">
+            <img src="https://kappa.lol/TkFgCM" alt="Icon" className="w-5 h-5 rounded-sm" referrerPolicy="no-referrer" />
+            <span className="text-sm font-medium">F.I.B - Sistema de Relatórios</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={onMinimize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors">
+              <Minus className="w-4 h-4" />
+            </button>
+            <button onClick={onMaximize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors hidden md:block">
+              <Square className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white hover:bg-red-500 rounded transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <button onClick={onMinimize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors">
-            <Minus className="w-4 h-4" />
-          </button>
-          <button onClick={onMaximize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors hidden md:block">
-            <Square className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white hover:bg-red-500 rounded transition-colors">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
 
       {/* Toolbar */}
       <div className="h-14 bg-slate-800 flex items-center justify-between px-4 shrink-0 border-b border-slate-700">
@@ -657,6 +745,30 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
           <input type="text" placeholder="Op. Name" value={metadata.operationName} onChange={e => handleMetadataChange('operationName', e.target.value)} className="w-32 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
           <input type="text" placeholder="Directive" value={metadata.directiveNo} onChange={e => handleMetadataChange('directiveNo', e.target.value)} className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
           <input type="text" placeholder="Agent" value={metadata.agentName} onChange={e => handleMetadataChange('agentName', e.target.value)} className="w-32 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+          <div className="h-6 w-px bg-slate-700 mx-2"></div>
+          <div className="flex items-center gap-2 pr-4 border-r border-slate-700">
+            <span className="text-[10px] font-bold text-slate-500 uppercase">Assinaturas:</span>
+            <input 
+              type="text" 
+              placeholder="Assin. Agente" 
+              value={metadata.agenteAssinatura || ''} 
+              onChange={e => handleMetadataChange('agenteAssinatura', e.target.value)} 
+              className="w-28 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white font-signature" 
+            />
+            <input 
+              type="text" 
+              placeholder="Assin. Diretoria" 
+              value={metadata.diretorAssinatura || ''} 
+              onChange={e => handleMetadataChange('diretorAssinatura', e.target.value)} 
+              className="w-28 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white font-signature" 
+            />
+            <button 
+              onClick={() => setIsDiretorMode(!isDiretorMode)}
+              className={`px-2 py-1 text-[10px] font-bold rounded border transition-colors ${isDiretorMode ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
+            >
+              MODO DIRETORIA
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -668,9 +780,9 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
             {drawMode ? 'Desativar Caneta' : 'Caneta Livre'}
           </button>
           
-          <button onClick={gerarLink} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors">
-             {linkGerado ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4" />}
-             {linkGerado ? 'Link Copiado!' : 'Copiar Link / Salvar'}
+          <button onClick={saveReport} disabled={salvando} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors disabled:opacity-50 min-w-[120px] justify-center">
+             {salvando ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4" />}
+             {salvando ? 'Salvando...' : 'Salvar no Banco'}
           </button>
           <button onClick={exportDocument} disabled={isExporting} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm transition-colors disabled:opacity-50">
             <Download className="w-4 h-4" />
@@ -681,10 +793,16 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
 
       {/* Editor Main Canvas */}
       <div 
-        className="flex-1 overflow-y-auto bg-slate-950 p-8 custom-scrollbar"
+        className="flex-1 overflow-y-auto bg-slate-950 p-8 custom-scrollbar min-h-64 flex flex-col items-center"
         onClick={() => setSelectedElement(null)}
       >
-        <div className="flex flex-col items-center gap-16 pb-32">
+        {loading ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-500 gap-4 mt-20">
+            <Loader2 className="w-10 h-10 animate-spin text-blue-500" />
+            <p className="text-sm font-medium animate-pulse uppercase tracking-widest">Carregando Relatório de Investigação...</p>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-16 pb-32 w-full">
           
           {/* COVER PAGE */}
           <div className="relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
@@ -698,6 +816,9 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
              )}
 
              <div ref={coverRef} className="relative w-[880px] h-[1200px] flex items-center justify-center overflow-hidden shadow-2xl" style={{ backgroundColor: '#c29b6c' }}>
+                {/* Texture/Noise overlay for cardboard effect */}
+                <div className="absolute inset-0 opacity-20 mix-blend-multiply pointer-events-none" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`}}></div>
+                
                 <div className="relative z-10 flex flex-col items-center w-full px-24">
                    {sealBase64 ? (
                      <img src={sealBase64} alt="FIB Seal" className="w-64 h-64 object-contain mb-16 opacity-90" />
@@ -705,9 +826,10 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
                      <div className="w-64 h-64 bg-black/10 rounded-full mb-16" />
                    )}
                 
-                <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center leading-tight">
-                  FEDERAL<br />INVESTIGATION<br />BUREAU
-                </h1>
+                 <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center leading-tight">
+                   {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'doj' ? 'DEPARTMENT OF JUSTICE' : 'SUPREMA CORTE DE JUSTIÇA') : 
+                    (profile?.role === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'FEDERAL INVESTIGATION BUREAU')}
+                 </h1>
                 
                 <div className="w-full h-1 bg-black/60 mb-2"></div>
                 <div className="w-full h-0.5 bg-black/40 mb-16"></div>
@@ -738,17 +860,17 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
                   </div>
                 </div>
 
-                {/* COVER ELEMENTS */}
-                {coverElements.map(el => (
-                  <DraggableElement
-                    key={el.id}
-                    el={el}
-                    selected={selectedElement === el.id}
-                    onSelect={() => setSelectedElement(el.id)}
-                    onChange={(changes) => updateElement('cover', el.id, changes)}
-                    onDelete={() => deleteElement('cover', el.id)}
-                    readOnly={isSignedMode}
-                  />
+                {coverElements.map((el) => (
+                  <React.Fragment key={el.id}>
+                    <DraggableElement
+                      el={el}
+                      selected={selectedElement === el.id}
+                      onSelect={() => setSelectedElement(el.id)}
+                      onChange={(changes) => updateElement('cover', el.id, changes)}
+                      onDelete={() => deleteElement('cover', el.id)}
+                      readOnly={isSignedMode}
+                    />
+                  </React.Fragment>
                 ))}
              </div>
           </div>
@@ -756,7 +878,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
 
           <div ref={docRef} className="flex flex-col gap-16 items-center w-full">
             {pages.map((page, index) => (
-              <div key={page.id} className="relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
+              <div key={page.id} className="page-export-container relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
                 {/* TOOLBAR FOR THIS PAGE */}
                 {!isSignedMode && (
                   <div className="absolute -left-16 top-10 flex flex-col gap-2">
@@ -863,23 +985,32 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
 
                   {/* Header */}
                   <div className="h-32 mx-16 pt-12 shrink-0 flex items-start justify-between border-b-2 border-black/80 z-0">
-                    {sealBase64 && <img src={sealBase64} alt="FIB" className="w-16 h-16 object-contain" />}
-                    <h2 className="text-xl font-bold font-serif tracking-wider text-black/90">FEDERAL INVESTIGATION BUREAU</h2>
+                    {sealBase64 && <img src={sealBase64} alt="Seal" className="w-16 h-16 object-contain" />}
+                    <div className="flex flex-col items-end">
+                      <h2 className="text-xl font-bold font-serif tracking-wider text-black/90 uppercase">{metadata.classification || 'RELATÓRIO DE INVESTIGAÇÃO'}</h2>
+                      <h3 className="text-sm font-bold font-serif tracking-wide text-black/70 italic opacity-80">
+                        {profile?.role === 'judge' ? 'SUPREMA CORTE DE JUSTIÇA' : 
+                         profile?.role === 'doj' ? 'DEPARTMENT OF JUSTICE' : 
+                         profile?.role === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' :
+                         'FEDERAL INVESTIGATION BUREAU'}
+                      </h3>
+                    </div>
                   </div>
 
                   {/* Content Canvas */}
                   <div className="flex-1 relative mx-2 z-20">
-                    {page.elements.map(el => (
-                      <DraggableElement 
-                        key={el.id} 
-                        el={el} 
-                        selected={selectedElement === el.id}
-                        onSelect={() => setSelectedElement(el.id)}
-                        onChange={(updates) => updateElement(page.id, el.id, updates)}
-                        onDelete={() => deleteElement(page.id, el.id)}
-                        onMoveToNextPage={() => moveElementToNextPage(index, el.id)}
-                        readOnly={isSignedMode}
-                      />
+                    {page.elements.map((el) => (
+                      <React.Fragment key={el.id}>
+                        <DraggableElement 
+                          el={el} 
+                          selected={selectedElement === el.id}
+                          onSelect={() => setSelectedElement(el.id)}
+                          onChange={(updates) => updateElement(page.id, el.id, updates)}
+                          onDelete={() => deleteElement(page.id, el.id)}
+                          onMoveToNextPage={() => moveElementToNextPage(index, el.id)}
+                          readOnly={isSignedMode}
+                        />
+                      </React.Fragment>
                     ))}
 
                     {/* Footer Signature Area on Last Page ONLY */}
@@ -914,17 +1045,19 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize }
                 </div>
               </div>
             ))}
+          </div>
 
-            {!isSignedMode && (
-              <button onClick={addPage} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-full shadow-lg transition-all hover:scale-105">
-                 <PlusCircle className="w-5 h-5" />
-                 Adicionar Nova Página
-              </button>
-            )}
+          {!isSignedMode && (
+            <button onClick={addPage} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-full shadow-lg transition-all hover:scale-105">
+               <PlusCircle className="w-5 h-5" />
+               Adicionar Nova Página
+            </button>
+          )}
 
           </div>
-        </div>
+        )}
       </div>
     </motion.div>
-  );
+  </Rnd>
+);
 }

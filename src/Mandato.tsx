@@ -1,7 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Minus, Square, FileText, Copy, Check, ChevronLeft, Printer, Image as ImageIcon, Save, FolderOpen, Trash2, Download } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { X, Minus, Square, FileText, Copy, Check, ChevronLeft, Printer, ImageIcon, Save, FolderOpen, Trash2, Download, Send, Loader2, User, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toBlob } from 'html-to-image';
+import { Rnd } from 'react-rnd';
+import { collection, query, where, getDocs, addDoc, serverTimestamp, arrayUnion, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { db } from './lib/firebase';
+import { useAuth, UserProfile, OperationType, handleFirestoreError } from './contexts/AuthContext';
+import { QUICK_USERS } from './constants';
 
 export type MandadoData = {
   directiveNo: string;
@@ -30,7 +35,38 @@ export type Draft = {
   data: MandadoData;
 };
 
-export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: { isMaximized: boolean, onClose: () => void, onMinimize: () => void, onMaximize: () => void }) {
+const isMagistrateRole = (role?: string) => {
+  if (!role) return false;
+  const r = role.toLowerCase();
+  const magistrateRoles = [
+    'judge', 'juiz', 'doj', 'magistrado', 'magistrada', 'promotor', 'promotora', 
+    'diretoria', 'diretor', 'diretora', 'procurador', 'procuradora', 'juiza', 'juíza',
+    'tribunal', 'desembargador', 'desembargadora', 'procuradoria', 'justiça', 'justica'
+  ];
+  return magistrateRoles.includes(r);
+};
+
+const INITIAL_FORM_DATA: MandadoData = {
+  directiveNo: '',
+  nomeOperacao: '',
+  requerenteNome: '',
+  requerenteBadge: '',
+  requerenteRank: '',
+  incidentes: '',
+  relatorios: '',
+  dataSolicitacao: new Date().toISOString().split('T')[0],
+  tipoMandado: 'Busca e Apreensão',
+  finalidade: '',
+  resumoFatos: '',
+  locaisBusca: '',
+  itensApreensao: '',
+  outrasMedidas: '',
+  juizAssinatura: '',
+  parecerJuiz: '',
+  statusMandado: 'Pendente'
+};
+
+export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, onFocus, zIndex }: { isMaximized: boolean, onClose: () => void, onMinimize: () => void, onMaximize: () => void, onFocus?: () => void, zIndex?: number }) {
   const [view, setView] = useState<'form' | 'preview'>('form');
   const [isJuizMode, setIsJuizMode] = useState(false);
   const [isSignedMode, setIsSignedMode] = useState(false);
@@ -39,59 +75,176 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
   const [linkDevolvidoGerado, setLinkDevolvidoGerado] = useState(false);
   const [showDraftsModal, setShowDraftsModal] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [formData, setFormData] = useState<MandadoData>({
-    directiveNo: '',
-    nomeOperacao: '',
-    requerenteNome: '',
-    requerenteBadge: '',
-    requerenteRank: '',
-    incidentes: '',
-    relatorios: '',
-    dataSolicitacao: new Date().toISOString().split('T')[0],
-    tipoMandado: 'Busca e Apreensão',
-    finalidade: '',
-    resumoFatos: '',
-    locaisBusca: '',
-    itensApreensao: '',
-    outrasMedidas: '',
-    juizAssinatura: '',
-    parecerJuiz: '',
-    statusMandado: 'Pendente'
-  });
+  const [showJudgeList, setShowJudgeList] = useState(false);
+  const [judges, setJudges] = useState<UserProfile[]>([]);
+  const [loadingJudges, setLoadingJudges] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [activeMandateId, setActiveMandateId] = useState<string | null>(null);
+  const [activeMandateOwnerId, setActiveMandateOwnerId] = useState<string | null>(null);
+  const { user, profile } = useAuth();
+  const [formData, setFormData] = useState<MandadoData>(INITIAL_FORM_DATA);
 
+  const loadMandate = useCallback(async (id: string) => {
+    setLoading(true);
+    setActiveMandateId(id);
+    try {
+      console.log(`Mandato: Carregando documento ID: ${id}`);
+      const docSnap = await getDoc(doc(db, 'mandates', id));
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        console.log("Mandato: Dados recuperados:", data);
+        
+        let finalData = { ...data.data };
+        
+        // Ensure status is synced
+        if (data.status && !finalData.statusMandado) {
+          finalData.statusMandado = data.status;
+        }
+
+        // Migration logic for old mandates
+        if (data.data?.propriedadeAlvo && !data.data?.locaisBusca) {
+           finalData.locaisBusca = data.data.propriedadeAlvo;
+        }
+        if (data.data?.fundamentacao && !data.data?.resumoFatos) {
+           finalData.resumoFatos = data.data.fundamentacao;
+        }
+        if (data.data?.proprietarioNome && !data.data?.requerenteNome) {
+           finalData.requerenteNome = `Dono: ${data.data.proprietarioNome}`;
+        }
+        if (data.data?.crimesTipificados && !finalData.resumoFatos?.includes(data.data.crimesTipificados)) {
+           finalData.resumoFatos = `${data.data.crimesTipificados}\n\n${finalData.resumoFatos || ''}`;
+        }
+        if (data.data?.dataAssinatura && !finalData.dataSolicitacao) {
+           finalData.dataSolicitacao = data.data.dataAssinatura;
+        }
+        if (data.data?.rgPassaporte || data.data?.dataNascimento) {
+           const infoAdicional = `[Dados Legados: RG: ${data.data.rgPassaporte || 'N/A'}, Nasc: ${data.data.dataNascimento || 'N/A'}]`;
+           if (!finalData.resumoFatos?.includes(infoAdicional)) {
+             finalData.resumoFatos = `${infoAdicional}\n${finalData.resumoFatos || ''}`;
+           }
+        }
+
+        setFormData({ ...INITIAL_FORM_DATA, ...finalData });
+        
+        setActiveMandateOwnerId(data.ownerId);
+        
+        // Se já estiver assinado por um juiz, trava os campos de edição
+        const signedByJuiz = (data.data?.juizAssinatura && data.data.juizAssinatura.trim() !== '');
+        setIsSignedMode(data.status === 'Aprovado' || data.status === 'Aprovado com Restrições' || signedByJuiz);
+        
+        // Ativa o modo juiz se o usuário tiver permissão ou se o documento veio de um link de juiz
+        const params = new URLSearchParams(window.location.search);
+        const isMagistrate = profile && isMagistrateRole(profile.role);
+        
+        if (params.get('mode') === 'juiz' || isMagistrate) {
+          console.log("Mandato: Sincronizando Modo Juiz");
+          setIsJuizMode(true);
+        }
+      } else {
+        console.error("Mandato: Documento não encontrado no Firestore.");
+      }
+    } catch (error) {
+      console.error("Erro ao carregar mandado:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [profile]);
+
+  // 1. Initial Loading Logic
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const dataParam = params.get('data');
+    const idParam = params.get('id');
     const modeParam = params.get('mode');
-    if (dataParam) {
-      try {
-        const decoded = JSON.parse(decodeURIComponent(atob(dataParam)));
-        setFormData(prev => ({ ...prev, ...decoded }));
-        
-        if (modeParam === 'agent') {
-          setIsJuizMode(false);
-        } else {
+    
+    const initialize = async () => {
+      // Priority 0: Check for pending mandate from global state (attachments)
+      const pending = (window as any).pendingMandate;
+      if (pending) {
+        console.log("Mandato: Carregando pendente do estado global:", pending);
+        delete (window as any).pendingMandate;
+        if (pending.mode === 'view') setIsJuizMode(true);
+        await loadMandate(pending.id);
+        return;
+      }
+
+      // Priority 1: Load by ID
+      if (idParam) {
+        console.log("Mandato: Carregando por ID da URL:", idParam);
+        await loadMandate(idParam);
+      } 
+      // Priority 2: Load by Data (Legacy)
+      else if (dataParam) {
+        try {
+          console.log("Mandato: Carregando por Data (Base64) da URL");
+          const decoded = JSON.parse(decodeURIComponent(atob(dataParam)));
+          setFormData({ ...INITIAL_FORM_DATA, ...decoded });
+          
+          if (modeParam === 'agent') {
+            setIsJuizMode(false);
+          } else if (modeParam === 'juiz' || (profile && isMagistrateRole(profile.role))) {
+            setIsJuizMode(true);
+            // Stay in form view so they can see the signature area
+          }
+          
+          if (decoded.juizAssinatura && decoded.juizAssinatura.trim() !== '') {
+            setIsSignedMode(true);
+          }
+        } catch (e) {
+          console.error("Erro ao carregar dados do link Base64", e);
+        }
+      }
+    };
+
+    initialize();
+  }, [profile, loadMandate]);
+
+  // 2. Synchronize Mode based on Loaded Profile and Document
+  useEffect(() => {
+    if (!profile) return;
+
+    const isMagistrate = isMagistrateRole(profile.role);
+    const params = new URLSearchParams(window.location.search);
+    const modeParam = params.get('mode');
+    
+    console.log(`Mandato Sync: Role=${profile.role}, isMagistrate=${isMagistrate}, activeMandateId=${activeMandateId}, modeParam=${modeParam}`);
+
+    // Logic: If user is Magistrate AND (viewing any saved document OR specifically requested juiz mode)
+    if (isMagistrate && (activeMandateId || modeParam === 'juiz')) {
+      console.log("Mandato: Modo Juiz Habilitado");
+      setIsJuizMode(true);
+      // We removed the auto-switch to 'preview' because the signature fields are in 'form' view
+    } else if (modeParam === 'juiz') {
+      // Even if not detected as magistrate by role, if the URL specifically asks for it (e.g. shared link)
+      setIsJuizMode(true);
+    } else if (modeParam === 'agent') {
+      setIsJuizMode(false);
+    }
+  }, [profile, activeMandateId, view]);
+
+  useEffect(() => {
+    // Listen for custom open event
+    const handleOpenMandate = (e: any) => {
+      const detail = e.detail;
+      const id = typeof detail === 'string' ? detail : detail?.id;
+      // If opened from email, we want to enable juiz mode if the user has the role or if explicitly requested
+      const forceJuizMode = typeof detail === 'object' && detail?.mode === 'view';
+      
+      console.log("Mandato: Evento open-mandate recebido", { id, forceJuizMode, detail });
+      
+      if (id) {
+        setView('form');
+        if (forceJuizMode) {
+          console.log("Mandato: Forçando Modo Juiz via Evento");
           setIsJuizMode(true);
         }
-        
-        if (decoded.juizAssinatura && decoded.juizAssinatura.trim() !== '') {
-          setIsSignedMode(true);
-        }
-      } catch (e) {
-        console.error("Erro ao carregar dados do link", e);
+        loadMandate(id);
       }
-    }
-
-    // Load drafts
-    const savedDrafts = localStorage.getItem('fib_mandados_drafts');
-    if (savedDrafts) {
-      try {
-        setDrafts(JSON.parse(savedDrafts));
-      } catch (e) {
-        console.error("Erro ao carregar rascunhos", e);
-      }
-    }
-  }, []);
+    };
+    window.addEventListener('open-mandate', handleOpenMandate);
+    return () => window.removeEventListener('open-mandate', handleOpenMandate);
+  }, [profile, loadMandate]);
 
   const saveDraft = () => {
     const newDraft: Draft = {
@@ -106,9 +259,71 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
     alert('Rascunho salvo com sucesso!');
   };
 
+  const salvarAlteracoesMandato = async () => {
+    if (!activeMandateId || !user || !profile) return;
+    
+    if (formData.statusMandado === 'Pendente' && profile.role === 'judge') {
+      if (!confirm('O status ainda está "Pendente". Deseja realmente devolver assim?')) {
+        return;
+      }
+    }
+
+    setIsSending(true);
+    try {
+      // 1. Update the document
+      try {
+        await updateDoc(doc(db, 'mandates', activeMandateId), {
+          data: formData,
+          status: formData.statusMandado || 'Pendente',
+          updatedAt: serverTimestamp()
+        });
+      } catch (e) {
+        handleFirestoreError(e, OperationType.UPDATE, `mandates/${activeMandateId}`);
+      }
+
+      // 2. Notify the owner via Email
+      if (activeMandateOwnerId) {
+        // Fetch owner details
+        const ownerSnap = await getDoc(doc(db, 'users', activeMandateOwnerId));
+        if (ownerSnap.exists()) {
+          const ownerData = ownerSnap.data() as UserProfile;
+          
+          try {
+            await addDoc(collection(db, 'emails'), {
+              fromId: user.uid,
+              fromEmail: user.email,
+              toId: ownerData.uid,
+              toEmail: ownerData.email,
+              subject: `Mandado Retornado: ${formData.nomeOperacao || formData.directiveNo}`,
+              body: `Olá, ${ownerData.displayName}.\n\nO magistrado ${profile.displayName} revisou sua solicitação de mandado.\n\nStatus: ${formData.statusMandado}\nOperação: ${formData.nomeOperacao || 'N/A'}\nDirective No: ${formData.directiveNo || 'N/A'}\n\nO documento assinado está disponível em anexo.`,
+              attachmentId: activeMandateId,
+              attachmentType: 'mandate',
+              read: false,
+              timestamp: serverTimestamp()
+            });
+          } catch (e) {
+            handleFirestoreError(e, OperationType.CREATE, 'emails');
+          }
+        }
+      }
+
+      alert('Mandado devolvido com sucesso para o solicitante!');
+      if (formData.juizAssinatura && formData.juizAssinatura.trim() !== '') {
+        setIsSignedMode(true);
+      }
+    } catch (error: any) {
+      console.error("Erro ao devolver mandado:", error);
+      alert('Erro ao devolver mandado: ' + error.message);
+    } finally {
+      setIsSending(false);
+    }
+  };
   const loadDraft = (draft: Draft) => {
-    setFormData(draft.data);
+    setFormData({ ...INITIAL_FORM_DATA, ...draft.data });
     setShowDraftsModal(false);
+    if (profile && isMagistrateRole(profile.role)) {
+      setIsJuizMode(true);
+    }
   };
 
   const deleteDraft = (id: string) => {
@@ -117,68 +332,222 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
     localStorage.setItem('fib_mandados_drafts', JSON.stringify(updatedDrafts));
   };
 
+  const fetchJudges = async () => {
+    setLoadingJudges(true);
+    try {
+      console.log("Mandato: Buscando magistrados...");
+      
+      let firestoreJudges: UserProfile[] = [];
+      
+      try {
+        // Broaden the search to all magistrate-related roles (Max 30 for 'in' query)
+        const roleFilters = [
+          'judge', 'Juiz', 'juiz', 'doj', 'DOJ', 'D.O.J',
+          'magistrado', 'Magistrado', 'magistrada', 'Magistrada', 
+          'promotor', 'Promotor', 'promotora', 'Promotora', 
+          'juiza', 'Juiza', 'juíza', 'Juíza', 
+          'procurador', 'Procurador', 'procuradora', 'Procuradora', 
+          'diretoria', 'Diretoria', 'diretor', 'Diretor', 'diretora', 'Diretora',
+          'admin', 'Admin'
+        ];
+        
+        console.log("Mandato: Consultando Firestore com filtros:", roleFilters);
+        const q = query(
+          collection(db, 'users'), 
+          where('role', 'in', roleFilters)
+        );
+        const querySnapshot = await getDocs(q);
+        firestoreJudges = querySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
+        console.log(`Mandato Firestore: Sucesso ao carregar ${firestoreJudges.length} magistrados.`);
+      } catch (e: any) {
+        console.error("Mandato: Erro ao buscar magistrados no Firestore:", e);
+        // We log the error but don't show to user yet, fallback to mock
+      }
+
+      // 2. Add Quick Users for testing (if they match roles)
+      const mockJudges = QUICK_USERS
+        .filter(u => ['judge', 'doj'].includes(u.role))
+        .map(u => ({
+          uid: u.id,
+          displayName: u.displayName,
+          email: `${u.username}@sistema.local`,
+          role: u.role,
+          status: 'active'
+        } as UserProfile));
+
+      // 3. Merge and remove duplicates (by uid)
+      const combined = [...firestoreJudges];
+      mockJudges.forEach(mj => {
+        if (!combined.find(cj => cj.uid === mj.uid)) {
+          combined.push(mj);
+        }
+      });
+
+      console.log(`Mandato: Encontrados ${combined.length} magistrados (Real: ${firestoreJudges.length}, Mock: ${mockJudges.length}).`);
+      setJudges(combined);
+    } catch (error) {
+      console.error("Erro ao buscar juízes:", error);
+    } finally {
+      setLoadingJudges(false);
+    }
+  };
+
+  const isFormValid = () => {
+    const requiredFields: (keyof MandadoData)[] = ['directiveNo', 'requerenteNome', 'finalidade', 'resumoFatos', 'locaisBusca'];
+    const missing = requiredFields.filter(field => !formData[field as keyof MandadoData]?.trim());
+    if (missing.length > 0) {
+      alert(`Por favor, preencha os campos obrigatórios antes de enviar:\n- ${missing.join('\n- ')}`);
+      return false;
+    }
+    return true;
+  };
+
+  const handleSendToJudge = async (recipient: UserProfile) => {
+    if (!user || !profile) return;
+    if (!isFormValid()) return;
+    
+    setIsSending(true);
+    try {
+      let mandateRef;
+      // 1. Create a mandate document in Firestore
+      try {
+        mandateRef = await addDoc(collection(db, 'mandates'), {
+          title: formData.nomeOperacao || formData.directiveNo || 'Mandado sem título',
+          data: formData,
+          ownerId: user.uid,
+          sharedWith: [recipient.uid],
+          status: 'Pendente',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        setActiveMandateId(mandateRef.id);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.CREATE, 'mandates');
+      }
+      
+      if (!mandateRef) return;
+
+      // 2. Send an email notification
+      try {
+        const mandateUrl = `${window.location.origin}${window.location.pathname}?id=${mandateRef.id}&mode=juiz`;
+        
+        await addDoc(collection(db, 'emails'), {
+          fromId: user.uid,
+          fromEmail: user.email,
+          toId: recipient.uid,
+          toEmail: recipient.email,
+          subject: `Novo Mandado para Revisão: ${formData.nomeOperacao || formData.directiveNo}`,
+          body: `Olá, ${recipient.displayName}.\n\nUm novo mandado foi enviado para sua revisão.\n\nOperação: ${formData.nomeOperacao || 'N/A'}\nDirective No: ${formData.directiveNo || 'N/A'}\n\nLink Direto: ${mandateUrl}\n\nVocê pode revisar o documento diretamente pelo sistema de e-mails clicando no anexo abaixo ou abrir o link acima.`,
+          attachmentId: mandateRef.id,
+          attachmentType: 'mandate',
+          read: false,
+          timestamp: serverTimestamp()
+        });
+      } catch (e) {
+        handleFirestoreError(e, OperationType.CREATE, 'emails');
+      }
+
+      alert('Mandado enviado com sucesso para o juiz!');
+      setShowJudgeList(false);
+    } catch (error: any) {
+      console.error("Erro ao enviar mandado:", error);
+      alert('Erro ao enviar mandado: ' + error.message);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const gerarLinkJuiz = () => {
-    const dataString = btoa(encodeURIComponent(JSON.stringify(formData)));
-    const url = `${window.location.origin}${window.location.pathname}?data=${dataString}&mode=juiz`;
+    if (!activeMandateId) {
+      alert("Por favor, envie o mandado para salvar no banco antes de gerar um link, ou utilize rascunho.");
+      return;
+    }
+    const url = `${window.location.origin}${window.location.pathname}?id=${activeMandateId}&mode=juiz`;
     navigator.clipboard.writeText(url);
     setLinkGerado(true);
     setTimeout(() => setLinkGerado(false), 3000);
   };
 
   const gerarLinkAssinado = () => {
-    const dataString = btoa(encodeURIComponent(JSON.stringify(formData)));
-    const url = `${window.location.origin}${window.location.pathname}?data=${dataString}&mode=juiz`;
+    if (!activeMandateId) {
+      alert("Este mandado não possui ID de registro. Salve antes de gerar link.");
+      return;
+    }
+    const url = `${window.location.origin}${window.location.pathname}?id=${activeMandateId}&mode=juiz`;
     navigator.clipboard.writeText(url);
     setLinkAssinadoGerado(true);
     setTimeout(() => setLinkAssinadoGerado(false), 3000);
   };
 
   const gerarLinkDevolucao = () => {
-    const dataString = btoa(encodeURIComponent(JSON.stringify(formData)));
-    const url = `${window.location.origin}${window.location.pathname}?data=${dataString}&mode=agent`;
+    if (!activeMandateId) {
+      alert("Este mandado não possui ID de registro. Salve antes de gerar link.");
+      return;
+    }
+    const url = `${window.location.origin}${window.location.pathname}?id=${activeMandateId}&mode=agent`;
     navigator.clipboard.writeText(url);
     setLinkDevolvidoGerado(true);
     setTimeout(() => setLinkDevolvidoGerado(false), 3000);
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.95, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95, y: 20 }}
-      transition={{ duration: 0.2 }}
-      className={`absolute bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col z-40 transition-all duration-200 ${
-        isMaximized 
-          ? 'inset-0 rounded-none' 
-          : 'inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[1000px] md:h-[750px] rounded-lg'
-      }`}
+    <Rnd
+      default={{
+        x: window.innerWidth / 2 - 500,
+        y: 40,
+        width: 1000,
+        height: 750,
+      }}
+      size={isMaximized ? { width: '100vw', height: '100vh' } : undefined}
+      position={isMaximized ? { x: 0, y: 0 } : undefined}
+      disableDragging={isMaximized}
+      enableResizing={!isMaximized}
+      dragHandleClassName="handle-drag"
+      bounds="window"
+      className="pointer-events-auto"
+      onMouseDown={onFocus}
+      style={{ zIndex }}
     >
-      {/* Window Header */}
-      <div className="h-10 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-3 select-none">
-        <div className="flex items-center gap-2 text-slate-300">
-          <img src="https://kappa.lol/TkFgCM" alt="Icon" className="w-5 h-5 rounded-sm" referrerPolicy="no-referrer" />
-          <span className="text-sm font-medium">F.I.B - Sistema de Mandados</span>
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        transition={{ duration: 0.2 }}
+        className={`bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col transition-all duration-200 w-full h-full ${
+          isMaximized ? 'rounded-none' : 'rounded-lg'
+        }`}
+      >
+        {/* Window Header */}
+        <div className="h-10 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-3 select-none handle-drag" onDoubleClick={onMaximize}>
+          <div className="flex items-center gap-2 text-slate-300 pointer-events-none">
+            <img src="https://kappa.lol/TkFgCM" alt="Icon" className="w-5 h-5 rounded-sm" referrerPolicy="no-referrer" />
+            <span className="text-sm font-medium">F.I.B - Sistema de Mandados</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={onMinimize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors">
+              <Minus className="w-4 h-4" />
+            </button>
+            <button onClick={onMaximize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors hidden md:block">
+              <Square className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white hover:bg-red-500 rounded transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <button onClick={onMinimize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors">
-            <Minus className="w-4 h-4" />
-          </button>
-          <button onClick={onMaximize} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors hidden md:block">
-            <Square className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white hover:bg-red-500 rounded transition-colors">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
 
       {/* Window Content */}
-      <div className="flex-1 overflow-hidden flex flex-col bg-slate-900">
-        {view === 'form' ? (
+      <div className="flex-1 overflow-hidden flex flex-col bg-slate-900 border-t border-slate-700/50">
+        {loading ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-500 gap-4">
+            <Loader2 className="w-10 h-10 animate-spin text-blue-500" />
+            <p className="text-sm font-medium animate-pulse uppercase tracking-widest">Carregando Mandato Judicial...</p>
+          </div>
+        ) : view === 'form' ? (
           <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
             <div className="max-w-4xl mx-auto">
               <div className="flex items-center justify-between mb-8">
@@ -204,36 +573,26 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
                         <Save className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={gerarLinkJuiz}
-                        className={`px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg ${
-                          linkGerado ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20' : 'bg-slate-700 hover:bg-slate-600 text-white shadow-slate-900/20'
-                        }`}
+                        onClick={() => { setShowJudgeList(true); fetchJudges(); }}
+                        className="px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20"
                       >
-                        {linkGerado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        {linkGerado ? 'Link Copiado!' : 'Copiar Link p/ Juiz'}
+                        <Send className="w-4 h-4" />
+                        Enviar para Juiz
                       </button>
                     </>
                   )}
                   {isJuizMode && !isSignedMode && (
                     <>
-                      <button 
-                        onClick={gerarLinkDevolucao}
-                        className={`px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg ${
-                          linkDevolvidoGerado ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/20' : 'bg-slate-700 hover:bg-slate-600 text-white shadow-slate-900/20'
-                        }`}
-                      >
-                        {linkDevolvidoGerado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        {linkDevolvidoGerado ? 'Link Copiado!' : 'Devolver p/ Agente'}
-                      </button>
-                      <button 
-                        onClick={gerarLinkAssinado}
-                        className={`px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg ${
-                          linkAssinadoGerado ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20' : 'bg-slate-700 hover:bg-slate-600 text-white shadow-slate-900/20'
-                        }`}
-                      >
-                        {linkAssinadoGerado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        {linkAssinadoGerado ? 'Link Copiado!' : 'Copiar Link Assinado'}
-                      </button>
+                      {activeMandateId && (
+                        <button 
+                          onClick={salvarAlteracoesMandato}
+                          disabled={isSending}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 shadow-lg shadow-emerald-900/20 disabled:opacity-50"
+                        >
+                          {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                          Devolver Assinado
+                        </button>
+                      )}
                     </>
                   )}
                   <button 
@@ -297,39 +656,39 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
                 )}
 
                 {/* Section 1 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode || isJuizMode ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">1. Requerente</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Nome do Agente</label>
-                      <input type="text" name="requerenteNome" value={formData.requerenteNome} onChange={handleChange} placeholder="Ex: John Smith" className="form-input" />
+                      <input type="text" name="requerenteNome" value={formData.requerenteNome} onChange={handleChange} placeholder="Ex: John Smith" className="form-input" readOnly={isJuizMode} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Badge</label>
-                      <input type="text" name="requerenteBadge" value={formData.requerenteBadge} onChange={handleChange} placeholder="Ex: 123" className="form-input" />
+                      <input type="text" name="requerenteBadge" value={formData.requerenteBadge} onChange={handleChange} placeholder="Ex: 123" className="form-input" readOnly={isJuizMode} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Rank</label>
-                      <input type="text" name="requerenteRank" value={formData.requerenteRank} onChange={handleChange} placeholder="Ex: Special Agent" className="form-input" />
+                      <input type="text" name="requerenteRank" value={formData.requerenteRank} onChange={handleChange} placeholder="Ex: Special Agent" className="form-input" readOnly={isJuizMode} />
                     </div>
                   </div>
                 </div>
 
                 {/* Section 2 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode || isJuizMode ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">2. Informações do Mandado</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Directive No. (Nome do Documento)</label>
-                      <input type="text" name="directiveNo" value={formData.directiveNo} onChange={handleChange} placeholder="Ex: MD-2023-001" className="form-input" />
+                      <input type="text" name="directiveNo" value={formData.directiveNo} onChange={handleChange} placeholder="Ex: MD-2023-001" className="form-input" readOnly={isJuizMode} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Nome da Operação</label>
-                      <input type="text" name="nomeOperacao" value={formData.nomeOperacao} onChange={handleChange} placeholder="Ex: Operação Valquíria" className="form-input" />
+                      <input type="text" name="nomeOperacao" value={formData.nomeOperacao} onChange={handleChange} placeholder="Ex: Operação Valquíria" className="form-input" readOnly={isJuizMode} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Tipo de Mandado</label>
-                      <select name="tipoMandado" value={formData.tipoMandado} onChange={handleChange} className="form-input">
+                      <select name="tipoMandado" value={formData.tipoMandado} onChange={handleChange} className="form-input" disabled={isJuizMode}>
                         <option>Busca e Apreensão</option>
                         <option>Prisão</option>
                         <option>Confisco de Bens</option>
@@ -342,49 +701,49 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Nº dos Incidentes</label>
-                      <input type="text" name="incidentes" value={formData.incidentes} onChange={handleChange} placeholder="Ex: INC-992" className="form-input" />
+                      <input type="text" name="incidentes" value={formData.incidentes} onChange={handleChange} placeholder="Ex: INC-992" className="form-input" readOnly={isJuizMode} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Nº dos Relatórios</label>
-                      <input type="text" name="relatorios" value={formData.relatorios} onChange={handleChange} placeholder="Ex: REL-401" className="form-input" />
+                      <input type="text" name="relatorios" value={formData.relatorios} onChange={handleChange} placeholder="Ex: REL-401" className="form-input" readOnly={isJuizMode} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Data da Solicitação</label>
-                      <input type="date" name="dataSolicitacao" value={formData.dataSolicitacao} onChange={handleChange} className="form-input" />
+                      <input type="date" name="dataSolicitacao" value={formData.dataSolicitacao} onChange={handleChange} className="form-input" readOnly={isJuizMode} />
                     </div>
                   </div>
                 </div>
 
                 {/* Section 3 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode || isJuizMode ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">3. Base Legal e Causa Provável</h3>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Finalidade do Mandado</label>
-                      <input type="text" name="finalidade" value={formData.finalidade} onChange={handleChange} placeholder="Ex: Apreensão de narcóticos e armas ilegais" className="form-input" />
+                      <input type="text" name="finalidade" value={formData.finalidade} onChange={handleChange} placeholder="Ex: Apreensão de narcóticos e armas ilegais" className="form-input" readOnly={isJuizMode} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Resumo dos Fatos</label>
-                      <textarea name="resumoFatos" value={formData.resumoFatos} onChange={handleChange} rows={5} placeholder="Descrição objetiva dos eventos, provas materiais, testemunhais..." className="form-input resize-y" />
+                      <textarea name="resumoFatos" value={formData.resumoFatos} onChange={handleChange} rows={5} placeholder="Descrição objetiva dos eventos, provas materiais, testemunhais..." className="form-input resize-y" readOnly={isJuizMode} />
                     </div>
                   </div>
                 </div>
 
                 {/* Section 4 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-60 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode || isJuizMode ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">4. Solicitação Específica</h3>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Locais de Busca (Veículos e Propriedades)</label>
-                      <textarea name="locaisBusca" value={formData.locaisBusca} onChange={handleChange} rows={3} placeholder="Ex: Residência na Vinewood Hills, Placa ABC-1234" className="form-input resize-y" />
+                      <textarea name="locaisBusca" value={formData.locaisBusca} onChange={handleChange} rows={3} placeholder="Ex: Residência na Vinewood Hills, Placa ABC-1234" className="form-input resize-y" readOnly={isJuizMode} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Itens a Apreender</label>
-                      <textarea name="itensApreensao" value={formData.itensApreensao} onChange={handleChange} rows={3} placeholder="Ex: Armas de fogo não registradas, dinheiro em espécie" className="form-input resize-y" />
+                      <textarea name="itensApreensao" value={formData.itensApreensao} onChange={handleChange} rows={3} placeholder="Ex: Armas de fogo não registradas, dinheiro em espécie" className="form-input resize-y" readOnly={isJuizMode} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Outras Medidas Necessárias</label>
-                      <textarea name="outrasMedidas" value={formData.outrasMedidas} onChange={handleChange} rows={2} placeholder="Ex: Bloqueio de contas bancárias" className="form-input resize-y" />
+                      <textarea name="outrasMedidas" value={formData.outrasMedidas} onChange={handleChange} rows={2} placeholder="Ex: Bloqueio de contas bancárias" className="form-input resize-y" readOnly={isJuizMode} />
                     </div>
                   </div>
                 </div>
@@ -396,7 +755,86 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
           <DocumentPreview formData={formData} onBack={() => setView('form')} />
         )}
       </div>
-      {/* Drafts Modal */}
+      {/* Judge Selection Modal */}
+      <AnimatePresence>
+        {showJudgeList && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]"
+            >
+              <div className="flex items-center justify-between p-4 border-b border-slate-800">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <User className="w-5 h-5 text-blue-400" />
+                  Selecionar Juiz / DOJ
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={fetchJudges}
+                    className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded transition-colors"
+                    title="Atualizar Lista"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => setShowJudgeList(false)}
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                {loadingJudges ? (
+                  <div className="flex flex-col items-center justify-center py-12 gap-3">
+                    <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                    <p className="text-sm text-slate-400">Buscando magistrados...</p>
+                  </div>
+                ) : judges.length === 0 ? (
+                  <div className="text-center text-slate-500 py-8">
+                    Nenhum juiz ou membro do DOJ encontrado.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {judges.map(judge => (
+                      <button 
+                        key={judge.uid}
+                        disabled={isSending}
+                        onClick={() => handleSendToJudge(judge)}
+                        className="w-full bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex items-center gap-3 hover:border-blue-500/50 hover:bg-slate-800 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400 font-bold group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                          {judge.displayName?.[0].toUpperCase() || 'J'}
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-medium text-slate-200">{judge.displayName}</h4>
+                          <p className="text-xs text-slate-500 uppercase tracking-wider">{judge.role}</p>
+                        </div>
+                        <Send className="w-4 h-4 text-slate-600 group-hover:text-blue-400" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {isSending && (
+                <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex items-center justify-center gap-2 text-blue-400 text-sm font-medium">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Enviando mandado...
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {showDraftsModal && (
           <motion.div 
@@ -461,12 +899,14 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize }: 
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+      </motion.div>
+    </Rnd>
   );
 }
 
 // --- Document Preview Component ---
 function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: () => void }) {
+  const { profile } = useAuth();
   const coverRef = useRef<HTMLDivElement>(null);
   const docRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -553,217 +993,291 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
   };
 
   // --- Pagination Logic ---
-  const A4_CONTENT_HEIGHT = 995; // 1123 - 128 (padding)
+  const A4_PAGE_HEIGHT = 920; // Visible pixels on A4 paper before we should consider a new page
+  const charsPerLine = 90;
   
   type Block = {
     id: string;
     height: number;
     render: () => React.ReactNode;
+    forceNewPage?: boolean;
   };
 
-  const blocks: Block[] = [];
+  const allBlocks: Block[] = [];
 
-  blocks.push({
+  allBlocks.push({
     id: 'header',
-    height: 220,
+    height: 280,
     render: () => (
-      <div key="header" className="flex flex-col mb-8">
-        <div className="flex justify-between items-start border-b-2 border-black/80 pb-6 mb-6">
+      <div key="header" className="flex flex-col mb-10">
+        <div className="flex justify-between items-start border-b-2 border-black/80 pb-6 mb-8">
           {sealBase64 ? (
             <img src={sealBase64} alt="FIB Logo" className="w-24 h-24 object-contain" />
           ) : (
             <div className="w-24 h-24 bg-black/10 rounded-full" />
           )}
           <div className="text-right">
-            <h2 className="text-xl font-bold font-serif tracking-wider text-black/90">DEPARTMENT OF JUSTICE</h2>
-            <h3 className="text-lg font-bold font-serif tracking-wide text-black/80">FEDERAL INVESTIGATION BUREAU</h3>
+            <h2 className="text-xl font-bold font-serif tracking-wider text-black/90 uppercase">
+              {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'doj' ? 'DEPARTMENT OF JUSTICE' : 'SUPREMA CORTE DE JUSTIÇA') : 
+               (profile?.role === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'FEDERAL INVESTIGATION BUREAU')}
+            </h2>
+            <h3 className="text-lg font-bold font-serif tracking-wide text-black/80 italic opacity-80">
+              {profile?.role === 'lspd' ? 'CITY OF LOS SANTOS' : 'STATE OF SAN ANDREAS'}
+            </h3>
           </div>
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-widest text-black/90">SOLICITAÇÃO DE MANDADO JUDICIAL</h1>
-          <p className="font-bold mt-2 text-black/80">Directive No.: <span className="font-normal">{formData.directiveNo || '[NÃO INFORMADO]'}</span></p>
+          <h1 className="text-2xl font-bold tracking-widest text-black/90 text-center border-y border-black/10 py-2 mb-4">SOLICITAÇÃO DE MANDADO JUDICIAL</h1>
+          <p className="font-bold border-l-4 border-black pl-3 py-1 bg-black/5">Directive No.: <span className="font-normal">{formData.directiveNo || '[NÃO INFORMADO]'}</span></p>
         </div>
       </div>
     )
   });
 
-  blocks.push({
+  allBlocks.push({
     id: 'requerente',
-    height: 100,
-    render: () => (
-      <section key="requerente" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">1. REQUERENTE</h3>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <p><span className="font-bold">Nome:</span> {formData.requerenteNome} {formData.requerenteBadge ? `- ${formData.requerenteBadge}` : ''}</p>
-          <p><span className="font-bold">Rank:</span> {formData.requerenteRank}</p>
-        </div>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'informacoes',
-    height: 140,
-    render: () => (
-      <section key="informacoes" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">2. INFORMAÇÕES DO MANDADO</h3>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <p><span className="font-bold">Incidentes:</span> {formData.incidentes}</p>
-          <p><span className="font-bold">Relatórios:</span> {formData.relatorios}</p>
-          <p><span className="font-bold">Data:</span> {formData.dataSolicitacao}</p>
-          <p><span className="font-bold">Tipo:</span> {formData.tipoMandado}</p>
-        </div>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'base_legal',
-    height: 120 + Math.ceil((formData.resumoFatos?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="base_legal" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">3. BASE LEGAL E CAUSA PROVÁVEL</h3>
-        <p className="mb-3 text-sm">Com base nos fatos e nas evidências listadas abaixo, solicita-se a expedição de mandado para <strong>{formData.finalidade || '[finalidade do mandado]'}</strong>.</p>
-        <p className="font-bold text-sm">Resumo dos Fatos:</p>
-        <p className="whitespace-pre-wrap mt-1 text-sm text-justify leading-relaxed">{formData.resumoFatos || '[Descrição objetiva dos eventos...]'}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'solicitacao',
-    height: 180 + Math.ceil((formData.locaisBusca?.length || 0) / 80) * 20 + Math.ceil((formData.itensApreensao?.length || 0) / 80) * 20 + Math.ceil((formData.outrasMedidas?.length || 0) / 80) * 20,
-    render: () => (
-      <section key="solicitacao" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">4. SOLICITAÇÃO ESPECÍFICA</h3>
-        <p className="mb-2 text-sm">O requerente solicita autorização para:</p>
-        
-        <p className="font-bold mt-3 text-sm">Realizar busca e apreensão no(s) seguinte(s) local(is):</p>
-        <p className="whitespace-pre-wrap ml-4 text-sm">{formData.locaisBusca || '[Listar Veículos e Propriedades]'}</p>
-
-        <p className="font-bold mt-3 text-sm">Apreender os seguintes itens, caso encontrados:</p>
-        <p className="whitespace-pre-wrap ml-4 text-sm">{formData.itensApreensao || '[Listagem de itens]'}</p>
-
-        <p className="font-bold mt-3 text-sm">Outras medidas necessárias:</p>
-        <p className="whitespace-pre-wrap ml-4 text-sm">{formData.outrasMedidas || '[Especificar, se aplicável]'}</p>
-      </section>
-    )
-  });
-
-  blocks.push({
-    id: 'declaracao',
     height: 120,
     render: () => (
-      <section key="declaracao" className="mb-6">
-        <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">5. DECLARAÇÃO DO REQUERENTE</h3>
-        <p className="text-justify text-sm leading-relaxed">
-          Declaro, sob as penas da lei, que as informações contidas nesta solicitação são verídicas e fundamentadas em
+      <section key="requerente" className="mb-8">
+        <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">1. REQUERENTE</h3>
+        <div className="grid grid-cols-2 gap-4 text-sm bg-black/[0.02] p-3 rounded border border-black/5">
+          <p><span className="font-bold text-black/60 uppercase text-[10px] block">Nome do Agente:</span> {formData.requerenteNome} {formData.requerenteBadge ? `- ${formData.requerenteBadge}` : ''}</p>
+          <p><span className="font-bold text-black/60 uppercase text-[10px] block">Patente/Cargo:</span> {formData.requerenteRank}</p>
+        </div>
+      </section>
+    )
+  });
+
+  // Calculate dynamic height for Informacoes
+  const incidentesLines = Math.ceil((formData.incidentes?.length || 0) / charsPerLine) || 1;
+  const relatoriosLines = Math.ceil((formData.relatorios?.length || 0) / charsPerLine) || 1;
+  const infoHeight = 100 + (incidentesLines * 22) + (relatoriosLines * 22);
+
+  allBlocks.push({
+    id: 'informacoes',
+    height: Math.max(160, infoHeight),
+    render: () => (
+      <section key="informacoes" className="mb-8">
+        <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">2. INFORMAÇÕES DO MANDADO</h3>
+        <div className="flex flex-col gap-4 text-sm bg-black/[0.02] p-4 rounded border border-black/5">
+          <div className="grid grid-cols-1 gap-4">
+            <p className="break-words"><span className="font-bold text-black/60 uppercase text-[10px] block mb-1">Incidentes Vinculados:</span> {formData.incidentes || 'N/A'}</p>
+            <p className="break-words border-t border-black/5 pt-3"><span className="font-bold text-black/60 uppercase text-[10px] block mb-1">Relatórios Criminais:</span> {formData.relatorios || 'N/A'}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4 border-t border-black/5 pt-3">
+            <p><span className="font-bold text-black/60 uppercase text-[10px] block mb-1">Data da Emissão:</span> {formData.dataSolicitacao}</p>
+            <p><span className="font-bold text-black/60 uppercase text-[10px] block mb-1">Tipo de Mandado:</span> {formData.tipoMandado}</p>
+          </div>
+        </div>
+      </section>
+    )
+  });
+
+  // Calculate dynamic heights for long texts with better accuracy
+  const resumoLines = Math.ceil((formData.resumoFatos?.length || 0) / charsPerLine) || 1;
+  const resumoHeight = 120 + (resumoLines * 22);
+
+  allBlocks.push({
+    id: 'base_legal',
+    height: Math.max(180, resumoHeight),
+    forceNewPage: true,
+    render: () => (
+      <section key="base_legal" className="mb-8">
+        <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">3. BASE LEGAL E CAUSA PROVÁVEL</h3>
+        <p className="mb-4 text-sm leading-relaxed text-justify">
+          Com base nos fatos articulados neste documento e nas evidências preliminares colhidas, solicita-se a expedição de mandado para <strong>{formData.finalidade || '[finalidade do mandado]'}</strong>.
+        </p>
+        <div className="bg-black/[0.01] p-4 border-l-2 border-black/20 overflow-hidden">
+          <p className="font-bold text-[10px] uppercase tracking-wider text-black/50 mb-2">Fundamentação e Resumo dos Fatos:</p>
+          <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed text-black/90 italic break-words">{formData.resumoFatos || '[Descrição objetiva dos eventos...]'}</p>
+        </div>
+      </section>
+    )
+  });
+
+  const locaisLines = Math.ceil((formData.locaisBusca?.length || 0) / charsPerLine) || 1;
+  const itensLines = Math.ceil((formData.itensApreensao?.length || 0) / charsPerLine) || 1;
+  const outrasLines = Math.ceil((formData.outrasMedidas?.length || 0) / charsPerLine) || 1;
+  
+  const solicitacaoHeight = 80 + (locaisLines * 22) + (itensLines * 22) + (outrasLines * 22) + 120;
+
+  allBlocks.push({
+    id: 'solicitacao',
+    height: Math.max(250, solicitacaoHeight),
+    render: () => (
+      <section key="solicitacao" className="mb-8">
+        <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">4. SOLICITAÇÃO ESPECÍFICA</h3>
+        <p className="mb-4 text-sm">A autoridade requerente solicita ordem judicial para:</p>
+        
+        <div className="space-y-4 ml-2">
+          <div>
+            <p className="font-bold text-[11px] uppercase tracking-widest text-black/70 mb-1 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-black rounded-full text-blue-900"></span>
+              Alvos e Locais de Busca:
+            </p>
+            <p className="whitespace-pre-wrap ml-4 text-sm border-l border-black/10 pl-3 py-1 break-words">{formData.locaisBusca || '[Listar Veículos e Propriedades]'}</p>
+          </div>
+
+          <div>
+            <p className="font-bold text-[11px] uppercase tracking-widest text-black/70 mb-1 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-black rounded-full"></span>
+              Itens a Apreender / Confiscar:
+            </p>
+            <p className="whitespace-pre-wrap ml-4 text-sm border-l border-black/10 pl-3 py-1 break-words">{formData.itensApreensao || '[Listagem de itens]'}</p>
+          </div>
+
+          <div>
+            <p className="font-bold text-[11px] uppercase tracking-widest text-black/70 mb-1 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-black rounded-full"></span>
+              Medidas Complementares:
+            </p>
+            <p className="whitespace-pre-wrap ml-4 text-sm border-l border-black/10 pl-3 py-1 break-words">{formData.outrasMedidas || '[Especificar, se aplicável]'}</p>
+          </div>
+        </div>
+      </section>
+    )
+  });
+
+  allBlocks.push({
+    id: 'declaracao',
+    height: 160,
+    forceNewPage: true,
+    render: () => (
+      <section key="declaracao" className="mb-10">
+        <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">5. DECLARAÇÃO DO REQUERENTE</h3>
+        <p className="text-justify text-sm leading-relaxed bg-slate-50 p-4 border border-black/5 rounded italic text-black/80">
+          "Declaro, sob as penas da lei, que as informações contidas nesta solicitação são verídicas e fundamentadas em
           evidências substanciais e concretas obtidas durante a investigação. Estas evidências justificam plenamente a
           necessidade da expedição do presente mandado, com a finalidade de assegurar a continuidade das apurações e
-          a devida aplicação da lei.
+          a devida aplicação da lei e da justiça."
         </p>
       </section>
     )
   });
 
-  if (false) {
-    // legacy disabled
+  if (formData.parecerJuiz || (formData.statusMandado && formData.statusMandado !== 'Pendente')) {
+    const textAvailable = formData.parecerJuiz || '';
+    const paragraphs = textAvailable.split('\n');
+    const MAX_CHARS_PER_BLOCK = 1200;
+    
+    let currentParecerText = '';
+    let currentCount = 0;
+    let blockIdx = 0;
+
+    const renderParecer = (text: string, isFirst: boolean, idx: number) => (
+      <section key={`parecer_${idx}`} className="mb-8 bg-gray-50 p-6 border-2 border-black/10 rounded-lg relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 opacity-[0.03] pointer-events-none transform translate-x-10 -translate-y-10 group">
+           {sealBase64 && <img src={sealBase64} alt="" className="w-full h-full object-contain grayscale" />}
+        </div>
+        
+        {isFirst ? (
+          <>
+            <h3 className="font-bold text-lg mb-4 border-b-2 border-black/20 pb-2 text-blue-900 uppercase tracking-tighter">6. DECISÃO JUDICIAL</h3>
+            <div className="flex gap-4 mb-6">
+               <div className={`px-4 py-1.5 text-white text-xs font-black uppercase tracking-[0.2em] rounded shadow-sm ${
+                 formData.statusMandado?.includes('Aprovado') ? 'bg-emerald-700' : 
+                 formData.statusMandado === 'Negado' ? 'bg-red-800' : 'bg-slate-800'
+               }`}>
+                 DECISÃO: {formData.statusMandado || 'PENDENTE'}
+               </div>
+            </div>
+          </>
+        ) : (
+          <h3 className="font-bold text-lg mb-4 border-b-2 border-black/20 pb-2 text-black/40 uppercase tracking-tighter">6. DECISÃO JUDICIAL (Continuação)</h3>
+        )}
+        <p className="font-bold text-[10px] uppercase tracking-[0.2em] text-black/40 mb-3 block">Fundamentação e Dispositivo Jurídico:</p>
+        <p className="whitespace-pre-wrap text-[13px] text-justify leading-relaxed font-serif text-black/85">{text || 'O magistrado não incluiu observações adicionais no parecer.'}</p>
+      </section>
+    );
+
+    paragraphs.forEach((p, i) => {
+      if (currentCount + p.length > MAX_CHARS_PER_BLOCK && currentCount > 0) {
+        const textToUse = currentParecerText;
+        const isFirst = blockIdx === 0;
+        const idx = blockIdx;
+        allBlocks.push({
+          id: `parecer_${idx}`,
+          height: 450,
+          forceNewPage: isFirst, // Start decision on a new page (Page 4)
+          render: () => renderParecer(textToUse, isFirst, idx)
+        });
+        currentParecerText = p + '\n';
+        currentCount = p.length + 1;
+        blockIdx++;
+      } else {
+        currentParecerText += p + '\n';
+        currentCount += p.length + 1;
+      }
+    });
+
+    if (currentParecerText) {
+      const textToUse = currentParecerText;
+      const isFirst = blockIdx === 0;
+      const idx = blockIdx;
+      allBlocks.push({
+        id: `parecer_final`,
+        height: 380,
+        forceNewPage: isFirst, // Start decision on a new page (Page 4)
+        render: () => renderParecer(textToUse, isFirst, idx)
+      });
+    }
   }
 
-  blocks.push({
+  // Check if signatures should start a new page (if no judicial decision blocks were added manually or if we want it isolated)
+  const hasJudicialDecision = formData.parecerJuiz || (formData.statusMandado && formData.statusMandado !== 'Pendente');
+
+  allBlocks.push({
     id: 'assinaturas',
-    height: 200,
+    height: 220,
+    forceNewPage: !hasJudicialDecision, // If no decision, signatures start Page 4. If decision exists, they follow it.
     render: () => (
-      <div key="assinaturas" className="mt-auto pt-8">
-        <h3 className="font-bold text-lg mb-12">6. ASSINATURA</h3>
-        <div className="flex justify-between px-8">
-          <div className="text-center w-64 relative">
+      <div key="assinaturas" className="mt-8 pt-8 border-t-4 border-double border-black/10">
+        <h3 className="font-bold text-xs mb-14 text-center text-black/40 uppercase tracking-[0.3em]">ASSINATURAS E VALIDAÇÃO DE FÉ PÚBLICA</h3>
+        <div className="flex justify-between px-10">
+          <div className="text-center w-64 relative group">
             {formData.requerenteNome && (
-              <div className="absolute bottom-6 w-full text-center pointer-events-none">
-                <span className="font-signature text-4xl text-[#0000a0] -rotate-2 inline-block opacity-90">
+              <div className="absolute bottom-8 w-full text-center pointer-events-none transition-transform group-hover:scale-105">
+                <span className="font-signature text-4xl text-[#0000a0]/90 -rotate-2 inline-block">
                   {formData.requerenteNome}
                 </span>
               </div>
             )}
-            <div className="border-b border-black mb-2"></div>
-            <p className="text-sm font-bold">Requerente</p>
+            <div className="border-b-2 border-black/80 mb-2"></div>
+            <p className="text-xs font-black uppercase tracking-widest text-black/80">Agente Requerente</p>
+            <p className="text-[10px] text-black/40 font-mono mt-0.5">{formData.requerenteRank || 'FEDERAL AGENT'}</p>
           </div>
-          <div className="text-center w-64 relative">
+          <div className="text-center w-64 relative group">
             {formData.juizAssinatura && (
-              <div className="absolute bottom-6 w-full text-center pointer-events-none">
-                <span className="font-signature text-5xl text-black -rotate-2 inline-block opacity-90">
+              <div className="absolute bottom-8 w-full text-center pointer-events-none transition-transform group-hover:scale-105">
+                <span className="font-signature text-4xl text-black -rotate-1 inline-block whitespace-nowrap">
                   {formData.juizAssinatura}
                 </span>
               </div>
             )}
-            <div className="border-b border-black mb-2"></div>
-            <p className="text-sm font-bold">Juiz</p>
+            <div className="border-b-2 border-black/80 mb-2"></div>
+            <p className="text-xs font-black uppercase tracking-widest text-black/80">Magistrado Responsável</p>
+            <p className="text-[10px] text-black/40 font-mono mt-0.5">SUPREMA CORTE / JUSTIÇA</p>
           </div>
         </div>
       </div>
     )
   });
 
-  const pages: Block[][] = [
-    blocks.filter(b => ['header', 'requerente', 'informacoes', 'base_legal'].includes(b.id)),
-    blocks.filter(b => ['solicitacao', 'declaracao'].includes(b.id))
-  ];
+  // Dynamic Page Distribution
+  const pages: Block[][] = [[]];
+  let currentHeight = 0;
+  let currentPageIndex = 0;
 
-  if (formData.parecerJuiz || formData.statusMandado) {
-    const textAvailable = formData.parecerJuiz || '';
-    const paragraphs = textAvailable.split('\n');
-    const MAX_CHARS_PER_PAGE = 2500;
-    
-    let chunkText = '';
-    let currentChunkCharCount = 0;
-    let pageIndex = 0;
-
-    const renderParecerJuizBlock = (text: string, isFirst: boolean, status: string | undefined, index: number) => (
-      <section key={`parecer_juiz_${index}`} className="mb-6 bg-gray-100/50 p-4 border border-gray-300 min-h-[400px]">
-        {isFirst ? (
-          <>
-            <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1">DECISÃO JUDICIAL</h3>
-            <p className="mb-2 text-sm"><span className="font-bold">Status:</span> {status || 'Pendente'}</p>
-            {text && <p className="font-bold mt-2 text-sm">Parecer / Observações:</p>}
-          </>
-        ) : (
-          <h3 className="font-bold text-lg mb-2 border-b border-black/20 pb-1 text-black/50">DECISÃO JUDICIAL (Continuação)</h3>
-        )}
-        {text && <p className="whitespace-pre-wrap ml-4 mt-2 text-sm text-justify leading-relaxed">{text}</p>}
-      </section>
-    );
-
-    for (let i = 0; i < paragraphs.length; i++) {
-        const p = paragraphs[i];
-        if (currentChunkCharCount + p.length > MAX_CHARS_PER_PAGE && chunkText !== '') {
-            const textToRender = chunkText.trim();
-            const isFirst = pageIndex === 0;
-            const idx = pageIndex;
-            pages.push([{
-                id: `parecer_juiz_${idx}`,
-                height: 800,
-                render: () => renderParecerJuizBlock(textToRender, isFirst, formData.statusMandado, idx)
-            }]);
-            chunkText = p + '\n';
-            currentChunkCharCount = p.length + 1;
-            pageIndex++;
-        } else {
-            chunkText += p + '\n';
-            currentChunkCharCount += p.length + 1;
-        }
+  allBlocks.forEach((block) => {
+    if ((block.forceNewPage && pages[currentPageIndex].length > 0) || (currentHeight + block.height > A4_PAGE_HEIGHT && pages[currentPageIndex].length > 0)) {
+      pages.push([block]);
+      currentHeight = block.height;
+      currentPageIndex++;
+    } else {
+      pages[currentPageIndex].push(block);
+      currentHeight += block.height;
     }
-    
-    // flush remainder
-    const isFirst = pageIndex === 0;
-    const idx = pageIndex;
-    pages.push([{
-        id: `parecer_juiz_${idx}`,
-        height: 800,
-        render: () => renderParecerJuizBlock(chunkText.trim(), isFirst, formData.statusMandado, idx)
-    }]);
-  }
-
-  pages.push(blocks.filter(b => ['assinaturas'].includes(b.id)));
+  });
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950">
@@ -814,8 +1328,9 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
                 <div className="w-64 h-64 bg-black/10 rounded-full mb-16" />
               )}
               
-              <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center">
-                FEDERAL INVESTIGATION BUREAU
+              <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center leading-tight">
+                {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'doj' ? 'DEPARTMENT OF JUSTICE' : 'SUPREMA CORTE DE JUSTIÇA') : 
+                 (profile?.role === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'FEDERAL INVESTIGATION BUREAU')}
               </h1>
               <div className="w-full h-1 bg-black/60 mb-2"></div>
               <div className="w-full h-0.5 bg-black/40 mb-16"></div>
