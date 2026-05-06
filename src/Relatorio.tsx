@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'motion/react';
 import { 
   ChevronLeft, Download, Image as ImageIcon, Type, Save, Square,
@@ -362,6 +362,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   const [isExporting, setIsExporting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [reportId, setReportId] = useState<string | null>(null);
+  const hasInitialized = useRef(false);
   
   const [sealBase64, setSealBase64] = useState<string>('');
   const docRef = useRef<HTMLDivElement>(null);
@@ -383,7 +384,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     return magistrateRoles.includes(r);
   };
 
-  const loadReport = async (id: string) => {
+  const loadReport = useCallback(async (id: string) => {
     setLoading(true);
     setReportId(id);
     try {
@@ -419,7 +420,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     } finally {
       setLoading(false);
     }
-  };
+  }, [profile]);
 
   const saveReport = async () => {
     if (!user) return;
@@ -460,25 +461,49 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
       const detail = e.detail;
       const id = typeof detail === 'string' ? detail : detail?.id;
       console.log("Relatorio: Evento open-report recebido", { id, detail });
-      if (id) loadReport(id);
+      if (id) {
+        hasInitialized.current = true;
+        loadReport(id);
+      }
     };
     window.addEventListener('open-report', handleOpenReport);
     return () => window.removeEventListener('open-report', handleOpenReport);
-  }, [profile, loadReport]); // Adicionado dependency loadReport e profile
+  }, [profile, loadReport]); 
 
   useEffect(() => {
-    // Check for pending report from global state (attachments)
-    const pending = (window as any).pendingReport;
-    if (pending) {
-      console.log("Relatorio: Carregando pendente do estado global:", pending);
-      delete (window as any).pendingReport;
-      loadReport(pending.id);
-      return;
-    }
+    const initialize = async () => {
+      if (hasInitialized.current) return;
+
+      // Check for pending report from global state (attachments)
+      const pending = (window as any).pendingReport;
+      if (pending) {
+        hasInitialized.current = true;
+        console.log("Relatorio: Carregando pendente do estado global:", pending);
+        delete (window as any).pendingReport;
+        await loadReport(pending.id);
+        return;
+      }
+
+      // Default to a blank report if not loading one
+      if (!reportId && pages.length === 0) {
+        hasInitialized.current = true;
+        setPages(migrateLegacyData({}));
+        setMetadata(prev => ({ 
+          ...prev, 
+          agentName: profile?.displayName || '',
+          classification: profile?.role === 'judge' ? 'SENTENÇA JUDICIAL' : 
+                           profile?.role === 'lspd' ? 'RELATÓRIO DE OCORRÊNCIA' : 
+                           'RELATÓRIO DE INVESTIGAÇÃO'
+        }));
+      }
+    };
+
+    initialize();
 
     const fetchLocalImage = async () => {
       try {
-        const logoUrl = '/logo.png';
+        const isDOJ = isMagistrateRole(profile?.role);
+        const logoUrl = isDOJ ? '/logojustice.png' : '/logo.png';
         setSealBase64(logoUrl);
         const res = await fetch(logoUrl);
         const blob = await res.blob();
@@ -490,19 +515,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
       } catch (e) { console.error(e); }
     };
     fetchLocalImage();
-    
-    // Default to a blank report if not loading one
-    if (!reportId && pages.length === 0) {
-      setPages(migrateLegacyData({}));
-      setMetadata(prev => ({ 
-        ...prev, 
-        agentName: profile?.displayName || '',
-        classification: profile?.role === 'judge' ? 'SENTENÇA JUDICIAL' : 
-                         profile?.role === 'lspd' ? 'RELATÓRIO DE OCORRÊNCIA' : 
-                         'RELATÓRIO DE INVESTIGAÇÃO'
-      }));
-    }
-  }, [profile]);
+  }, [profile, loadReport]);
 
   const handleMetadataChange = (key: keyof RelatorioMetadata, value: string) => {
     setMetadata(prev => ({ ...prev, [key]: value }));
@@ -860,13 +873,13 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                 
                 <div className="relative z-10 flex flex-col items-center w-full px-24">
                    {sealBase64 ? (
-                     <img src={sealBase64} alt="FIB Seal" className="w-64 h-64 object-contain mb-16 opacity-90" />
+                     <img src={sealBase64} alt="Seal" className="w-64 h-64 object-contain mb-16 opacity-90" />
                    ) : (
                      <div className="w-64 h-64 bg-black/10 rounded-full mb-16" />
                    )}
                 
-                 <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center leading-tight">
-                   {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'doj' ? 'DEPARTMENT OF JUSTICE' : 'SUPREMA CORTE DE JUSTIÇA') : 
+                 <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center leading-tight uppercase">
+                   {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'DEPARTMENT OF JUSTICE') : 
                     (profile?.role === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'FEDERAL INVESTIGATION BUREAU')}
                  </h1>
                 
@@ -1027,9 +1040,8 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                     {sealBase64 && <img src={sealBase64} alt="Seal" className="w-16 h-16 object-contain" />}
                     <div className="flex flex-col items-end">
                       <h2 className="text-xl font-bold font-serif tracking-wider text-black/90 uppercase">{metadata.classification || 'RELATÓRIO DE INVESTIGAÇÃO'}</h2>
-                      <h3 className="text-sm font-bold font-serif tracking-wide text-black/70 italic opacity-80">
-                        {profile?.role === 'judge' ? 'SUPREMA CORTE DE JUSTIÇA' : 
-                         profile?.role === 'doj' ? 'DEPARTMENT OF JUSTICE' : 
+                      <h3 className="text-sm font-bold font-serif tracking-wide text-black/70 italic opacity-80 uppercase">
+                        {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'DEPARTMENT OF JUSTICE') : 
                          profile?.role === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' :
                          'FEDERAL INVESTIGATION BUREAU'}
                       </h3>
@@ -1076,8 +1088,8 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                   </div>
 
                   {/* Footer */}
-                  <div className="h-16 shrink-0 border-t border-black/20 mx-16 flex items-center justify-between text-xs text-black/50 font-mono z-0">
-                    <span>F.I.B - CONFIDENTIAL</span>
+                  <div className="h-16 shrink-0 border-t border-black/20 mx-16 flex items-center justify-between text-xs text-black/50 font-mono z-0 uppercase">
+                    <span>{isMagistrateRole(profile?.role) ? 'DEPARTMENT OF JUSTICE' : (profile?.role === 'lspd' ? 'LSPD' : 'F.I.B')} - CONFIDENTIAL</span>
                     <span>Page {index + 1} of {pages.length}</span>
                     <span>{metadata.directiveNo || 'UNREGISTERED'}</span>
                   </div>

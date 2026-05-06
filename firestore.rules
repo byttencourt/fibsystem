@@ -56,11 +56,11 @@ service cloud.firestore {
 
       allow create: if ((isSignedIn() && incoming().fromId == request.auth.uid) || !isSignedIn()) && isValidEmail(incoming());
       
-      allow read: if isSignedIn() && (
+      allow read: if (isSignedIn() && (
         resource.data.toId == request.auth.uid || 
         resource.data.fromId == request.auth.uid ||
         isAdmin()
-      ) || (!isSignedIn() && resource.data.toId != "");
+      )) || resource.data.toId != "";
 
       allow update: if isSignedIn() && 
                       (resource.data.toId == request.auth.uid || isAdmin()) && 
@@ -78,11 +78,11 @@ service cloud.firestore {
 
       allow create: if ((isSignedIn() && incoming().ownerId == request.auth.uid) || !isSignedIn()) && isValidReport(incoming());
       
-      allow read: if isSignedIn() && (
+      allow read: if (isSignedIn() && (
         resource.data.ownerId == request.auth.uid || 
         (request.auth.uid in resource.data.sharedWith) ||
         isAdmin()
-      ) || (!isSignedIn() && resource.data.ownerId != "");
+      )) || resource.data.ownerId != "";
 
       allow update: if (isSignedIn() && (
         (resource.data.ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'metadata', 'pages', 'coverElements', 'updatedAt', 'sharedWith'])) ||
@@ -106,12 +106,12 @@ service cloud.firestore {
       // mas mantemos validação de esquema rigorosa.
       allow create: if ((isSignedIn() && incoming().ownerId == request.auth.uid) || !isSignedIn()) && isValidMandate(incoming());
       
-      allow read: if isSignedIn() && (
+      allow read: if (isSignedIn() && (
         resource.data.ownerId == request.auth.uid || 
         (request.auth.uid in resource.data.sharedWith) ||
         resource.data.ownerId == "admin_id" || // Fallback para mandados de sistema
         isAdmin()
-      ) || (!isSignedIn() && resource.data.ownerId != ""); // Permite leitura básica se não houver auth (para compartilhamento via link)
+      )) || resource.data.ownerId != ""; // Permite leitura básica (para compartilhamento via link)
 
       allow update: if (isSignedIn() && (
         (resource.data.ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'data', 'sharedWith', 'status', 'updatedAt'])) ||

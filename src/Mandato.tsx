@@ -83,6 +83,20 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
   const [activeMandateOwnerId, setActiveMandateOwnerId] = useState<string | null>(null);
   const { user, profile } = useAuth();
   const [formData, setFormData] = useState<MandadoData>(INITIAL_FORM_DATA);
+  const [loadingDrafts, setLoadingDrafts] = useState(false);
+  const hasInitialized = useRef(false);
+
+  // Load drafts on mount
+  useEffect(() => {
+    const savedDrafts = localStorage.getItem('fib_mandados_drafts');
+    if (savedDrafts) {
+      try {
+        setDrafts(JSON.parse(savedDrafts));
+      } catch (e) {
+        console.error("Erro ao carregar rascunhos do localStorage:", e);
+      }
+    }
+  }, []);
 
   const loadMandate = useCallback(async (id: string) => {
     setLoading(true);
@@ -144,13 +158,13 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
         console.error("Mandato: Documento não encontrado no Firestore.");
       }
     } catch (error) {
-      console.error("Erro ao carregar mandado:", error);
+      handleFirestoreError(error, OperationType.GET, `mandates/${id}`);
     } finally {
       setLoading(false);
     }
   }, [profile]);
 
-  // 1. Initial Loading Logic
+  // Initial Loading Logic
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const dataParam = params.get('data');
@@ -158,9 +172,24 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
     const modeParam = params.get('mode');
     
     const initialize = async () => {
+      if (hasInitialized.current) return;
+
+      // Check local storage for drafts if we haven't yet
+      if (drafts.length === 0) {
+        const savedDrafts = localStorage.getItem('fib_mandados_drafts');
+        if (savedDrafts) {
+          try {
+            setDrafts(JSON.parse(savedDrafts));
+          } catch (e) {
+            console.error("Erro ao carregar rascunhos:", e);
+          }
+        }
+      }
+
       // Priority 0: Check for pending mandate from global state (attachments)
       const pending = (window as any).pendingMandate;
       if (pending) {
+        hasInitialized.current = true;
         console.log("Mandato: Carregando pendente do estado global:", pending);
         delete (window as any).pendingMandate;
         if (pending.mode === 'view') setIsJuizMode(true);
@@ -170,11 +199,13 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
 
       // Priority 1: Load by ID
       if (idParam) {
+        hasInitialized.current = true;
         console.log("Mandato: Carregando por ID da URL:", idParam);
         await loadMandate(idParam);
       } 
       // Priority 2: Load by Data (Legacy)
       else if (dataParam) {
+        hasInitialized.current = true;
         try {
           console.log("Mandato: Carregando por Data (Base64) da URL");
           const decoded = JSON.parse(decodeURIComponent(atob(dataParam)));
@@ -184,7 +215,6 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
             setIsJuizMode(false);
           } else if (modeParam === 'juiz' || (profile && isMagistrateRole(profile.role))) {
             setIsJuizMode(true);
-            // Stay in form view so they can see the signature area
           }
           
           if (decoded.juizAssinatura && decoded.juizAssinatura.trim() !== '') {
@@ -197,7 +227,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
     };
 
     initialize();
-  }, [profile, loadMandate]);
+  }, [profile, loadMandate, drafts.length]);
 
   // 2. Synchronize Mode based on Loaded Profile and Document
   useEffect(() => {
@@ -476,6 +506,9 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
     setTimeout(() => setLinkDevolvidoGerado(false), 3000);
   };
 
+  const isPromotor = profile?.role?.toLowerCase().includes('promotor');
+  const canEditFields = !isSignedMode && (!isJuizMode || isPromotor);
+
   return (
     <Rnd
       default={{
@@ -559,7 +592,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                         className="px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20"
                       >
                         <Send className="w-4 h-4" />
-                        Enviar para Juiz
+                        Enviar
                       </button>
                     </>
                   )}
@@ -638,39 +671,39 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                 )}
 
                 {/* Section 1 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode || isJuizMode ? 'opacity-80 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">1. Requerente</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Nome do Agente</label>
-                      <input type="text" name="requerenteNome" value={formData.requerenteNome} onChange={handleChange} placeholder="Ex: John Smith" className="form-input" readOnly={isJuizMode} />
+                      <input type="text" name="requerenteNome" value={formData.requerenteNome} onChange={handleChange} placeholder="Ex: John Smith" className="form-input" readOnly={!canEditFields} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Badge</label>
-                      <input type="text" name="requerenteBadge" value={formData.requerenteBadge} onChange={handleChange} placeholder="Ex: 123" className="form-input" readOnly={isJuizMode} />
+                      <input type="text" name="requerenteBadge" value={formData.requerenteBadge} onChange={handleChange} placeholder="Ex: 123" className="form-input" readOnly={!canEditFields} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Rank</label>
-                      <input type="text" name="requerenteRank" value={formData.requerenteRank} onChange={handleChange} placeholder="Ex: Special Agent" className="form-input" readOnly={isJuizMode} />
+                      <input type="text" name="requerenteRank" value={formData.requerenteRank} onChange={handleChange} placeholder="Ex: Special Agent" className="form-input" readOnly={!canEditFields} />
                     </div>
                   </div>
                 </div>
 
                 {/* Section 2 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode || isJuizMode ? 'opacity-80 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">2. Informações do Mandado</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Directive No. (Nome do Documento)</label>
-                      <input type="text" name="directiveNo" value={formData.directiveNo} onChange={handleChange} placeholder="Ex: MD-2023-001" className="form-input" readOnly={isJuizMode} />
+                      <input type="text" name="directiveNo" value={formData.directiveNo} onChange={handleChange} placeholder="Ex: MD-2023-001" className="form-input" readOnly={!canEditFields} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Nome da Operação</label>
-                      <input type="text" name="nomeOperacao" value={formData.nomeOperacao} onChange={handleChange} placeholder="Ex: Operação Valquíria" className="form-input" readOnly={isJuizMode} />
+                      <input type="text" name="nomeOperacao" value={formData.nomeOperacao} onChange={handleChange} placeholder="Ex: Operação Valquíria" className="form-input" readOnly={!canEditFields} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Tipo de Mandado</label>
-                      <select name="tipoMandado" value={formData.tipoMandado} onChange={handleChange} className="form-input" disabled={isJuizMode}>
+                      <select name="tipoMandado" value={formData.tipoMandado} onChange={handleChange} className="form-input" disabled={!canEditFields}>
                         <option>Busca e Apreensão</option>
                         <option>Prisão</option>
                         <option>Confisco de Bens</option>
@@ -683,49 +716,49 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Nº dos Incidentes</label>
-                      <input type="text" name="incidentes" value={formData.incidentes} onChange={handleChange} placeholder="Ex: INC-992" className="form-input" readOnly={isJuizMode} />
+                      <input type="text" name="incidentes" value={formData.incidentes} onChange={handleChange} placeholder="Ex: INC-992" className="form-input" readOnly={!canEditFields} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Nº dos Relatórios</label>
-                      <input type="text" name="relatorios" value={formData.relatorios} onChange={handleChange} placeholder="Ex: REL-401" className="form-input" readOnly={isJuizMode} />
+                      <input type="text" name="relatorios" value={formData.relatorios} onChange={handleChange} placeholder="Ex: REL-401" className="form-input" readOnly={!canEditFields} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Data da Solicitação</label>
-                      <input type="date" name="dataSolicitacao" value={formData.dataSolicitacao} onChange={handleChange} className="form-input" readOnly={isJuizMode} />
+                      <input type="date" name="dataSolicitacao" value={formData.dataSolicitacao} onChange={handleChange} className="form-input" readOnly={!canEditFields} />
                     </div>
                   </div>
                 </div>
 
                 {/* Section 3 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode || isJuizMode ? 'opacity-80 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">3. Base Legal e Causa Provável</h3>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Finalidade do Mandado</label>
-                      <input type="text" name="finalidade" value={formData.finalidade} onChange={handleChange} placeholder="Ex: Apreensão de narcóticos e armas ilegais" className="form-input" readOnly={isJuizMode} />
+                      <input type="text" name="finalidade" value={formData.finalidade} onChange={handleChange} placeholder="Ex: Apreensão de narcóticos e armas ilegais" className="form-input" readOnly={!canEditFields} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Resumo dos Fatos</label>
-                      <textarea name="resumoFatos" value={formData.resumoFatos} onChange={handleChange} rows={5} placeholder="Descrição objetiva dos eventos, provas materiais, testemunhais..." className="form-input resize-y" readOnly={isJuizMode} />
+                      <textarea name="resumoFatos" value={formData.resumoFatos} onChange={handleChange} rows={5} placeholder="Descrição objetiva dos eventos, provas materiais, testemunhais..." className="form-input resize-y" readOnly={!canEditFields} />
                     </div>
                   </div>
                 </div>
 
                 {/* Section 4 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode || isJuizMode ? 'opacity-80 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">4. Solicitação Específica</h3>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Locais de Busca (Veículos e Propriedades)</label>
-                      <textarea name="locaisBusca" value={formData.locaisBusca} onChange={handleChange} rows={3} placeholder="Ex: Residência na Vinewood Hills, Placa ABC-1234" className="form-input resize-y" readOnly={isJuizMode} />
+                      <textarea name="locaisBusca" value={formData.locaisBusca} onChange={handleChange} rows={3} placeholder="Ex: Residência na Vinewood Hills, Placa ABC-1234" className="form-input resize-y" readOnly={!canEditFields} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Itens a Apreender</label>
-                      <textarea name="itensApreensao" value={formData.itensApreensao} onChange={handleChange} rows={3} placeholder="Ex: Armas de fogo não registradas, dinheiro em espécie" className="form-input resize-y" readOnly={isJuizMode} />
+                      <textarea name="itensApreensao" value={formData.itensApreensao} onChange={handleChange} rows={3} placeholder="Ex: Armas de fogo não registradas, dinheiro em espécie" className="form-input resize-y" readOnly={!canEditFields} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">Outras Medidas Necessárias</label>
-                      <textarea name="outrasMedidas" value={formData.outrasMedidas} onChange={handleChange} rows={2} placeholder="Ex: Bloqueio de contas bancárias" className="form-input resize-y" readOnly={isJuizMode} />
+                      <textarea name="outrasMedidas" value={formData.outrasMedidas} onChange={handleChange} rows={2} placeholder="Ex: Bloqueio de contas bancárias" className="form-input resize-y" readOnly={!canEditFields} />
                     </div>
                   </div>
                 </div>
@@ -899,7 +932,9 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
 
   useEffect(() => {
     const fetchLocalImage = async () => {
-      const logoUrl = '/logo.png';
+      const isDOJ = isMagistrateRole(profile?.role);
+      const logoUrl = isDOJ ? '/logojustice.png' : '/logo.png';
+      
       // Set immediately for fast display
       setSealBase64(logoUrl);
       setCoverSealBase64(logoUrl);
@@ -924,7 +959,7 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
     };
 
     fetchLocalImage();
-  }, []);
+  }, [profile]);
 
   const exportSingleImage = async (element: HTMLElement, filename: string, bgColor: string = 'rgba(0,0,0,0)') => {
     const blob = await toBlob(element, {
@@ -1000,11 +1035,11 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
           )}
           <div className="text-right">
             <h2 className="text-xl font-bold font-serif tracking-wider text-black/90 uppercase">
-              {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'doj' ? 'DEPARTMENT OF JUSTICE' : 'SUPREMA CORTE DE JUSTIÇA') : 
+              {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'DEPARTMENT OF JUSTICE') : 
                (profile?.role === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'FEDERAL INVESTIGATION BUREAU')}
             </h2>
-            <h3 className="text-lg font-bold font-serif tracking-wide text-black/80 italic opacity-80">
-              {profile?.role === 'lspd' ? 'CITY OF LOS SANTOS' : 'STATE OF SAN ANDREAS'}
+            <h3 className="text-lg font-bold font-serif tracking-wide text-black/80 italic opacity-80 uppercase">
+              {isMagistrateRole(profile?.role) ? 'DEPARTMENT OF JUSTICE' : (profile?.role === 'lspd' ? 'CITY OF LOS SANTOS' : 'STATE OF SAN ANDREAS')}
             </h3>
           </div>
         </div>
@@ -1310,8 +1345,8 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
                 <div className="w-64 h-64 bg-black/10 rounded-full mb-16" />
               )}
               
-              <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center leading-tight">
-                {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'doj' ? 'DEPARTMENT OF JUSTICE' : 'SUPREMA CORTE DE JUSTIÇA') : 
+              <h1 className="text-5xl font-serif font-bold text-black/80 tracking-[0.2em] mb-4 text-center leading-tight uppercase">
+                {isMagistrateRole(profile?.role) ? (profile?.role?.toLowerCase() === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'DEPARTMENT OF JUSTICE') : 
                  (profile?.role === 'lspd' ? 'LOS SANTOS POLICE DEPARTMENT' : 'FEDERAL INVESTIGATION BUREAU')}
               </h1>
               <div className="w-full h-1 bg-black/60 mb-2"></div>
