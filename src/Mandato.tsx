@@ -74,9 +74,9 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
   const [linkDevolvidoGerado, setLinkDevolvidoGerado] = useState(false);
   const [showDraftsModal, setShowDraftsModal] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [showJudgeList, setShowJudgeList] = useState(false);
-  const [judges, setJudges] = useState<UserProfile[]>([]);
-  const [loadingJudges, setLoadingJudges] = useState(false);
+  const [showRecipientList, setShowRecipientList] = useState(false);
+  const [recipients, setRecipients] = useState<UserProfile[]>([]);
+  const [loadingRecipients, setLoadingRecipients] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeMandateId, setActiveMandateId] = useState<string | null>(null);
@@ -361,46 +361,52 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
     localStorage.setItem('fib_mandados_drafts', JSON.stringify(updatedDrafts));
   };
 
-  const fetchJudges = async () => {
-    setLoadingJudges(true);
+  const fetchRecipients = async () => {
+    setLoadingRecipients(true);
     try {
-      console.log("Mandato: Buscando magistrados...");
+      console.log("Mandato: Buscando destinatários...");
       
-      let firestoreJudges: UserProfile[] = [];
+      let firestoreUsers: UserProfile[] = [];
       
       try {
-        // Broaden the search to all magistrate-related roles (Max 30 for 'in' query)
-        const roleFilters = [
-          'judge', 'Juiz', 'juiz', 'doj', 'DOJ', 'D.O.J',
-          'magistrado', 'Magistrado', 'magistrada', 'Magistrada', 
-          'promotor', 'Promotor', 'promotora', 'Promotora', 
-          'juiza', 'Juiza', 'juíza', 'Juíza', 
-          'procurador', 'Procurador', 'procuradora', 'Procuradora', 
-          'diretoria', 'Diretoria', 'diretor', 'Diretor', 'diretora', 'Diretora',
-          'admin', 'Admin'
-        ];
+        const isMagistrate = isMagistrateRole(profile?.role);
         
-        console.log("Mandato: Consultando Firestore com filtros:", roleFilters);
-        const q = query(
-          collection(db, 'users'), 
-          where('role', 'in', roleFilters)
-        );
+        let q;
+        if (isMagistrate) {
+          // If magistrate, show almost everyone
+          q = query(collection(db, 'users'));
+        } else {
+          // If agent, focus on magistrates/DOJ
+          const roleFilters = [
+            'judge', 'Juiz', 'juiz', 'doj', 'DOJ', 'D.O.J',
+            'magistrado', 'Magistrado', 'magistrada', 'Magistrada', 
+            'promotor', 'Promotor', 'promotora', 'Promotora', 
+            'juiza', 'Juiza', 'juíza', 'Juíza', 
+            'procurador', 'Procurador', 'procuradora', 'Procuradora', 
+            'diretoria', 'Diretoria', 'diretor', 'Diretor', 'diretora', 'Diretora',
+            'admin', 'Admin'
+          ];
+          q = query(
+            collection(db, 'users'), 
+            where('role', 'in', roleFilters)
+          );
+        }
+        
         const querySnapshot = await getDocs(q);
-        firestoreJudges = querySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
-        console.log(`Mandato Firestore: Sucesso ao carregar ${firestoreJudges.length} magistrados.`);
+        firestoreUsers = querySnapshot.docs
+          .map(doc => ({ uid: doc.id, ...(doc.data() as any) } as UserProfile))
+          .filter(u => u.uid !== user?.uid);
+          
+        console.log(`Mandato Firestore: Sucesso ao carregar ${firestoreUsers.length} destinatários.`);
       } catch (e: any) {
-        console.error("Mandato: Erro ao buscar magistrados no Firestore:", e);
-        // We log the error but don't show to user yet, fallback to mock
+        console.error("Mandato: Erro ao buscar destinatários no Firestore:", e);
       }
 
-      // 3. Keep only firestore results
-      const combined = [...firestoreJudges];
-      console.log(`Mandato: Encontrados ${combined.length} magistrados.`);
-      setJudges(combined);
+      setRecipients(firestoreUsers);
     } catch (error) {
-      console.error("Erro ao buscar juízes:", error);
+      console.error("Erro ao buscar destinatários:", error);
     } finally {
-      setLoadingJudges(false);
+      setLoadingRecipients(false);
     }
   };
 
@@ -414,43 +420,60 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
     return true;
   };
 
-  const handleSendToJudge = async (recipient: UserProfile) => {
+  const handleSendOrForward = async (recipient: UserProfile) => {
     if (!user || !profile) return;
     if (!isFormValid()) return;
     
     setIsSending(true);
     try {
-      let mandateRef;
-      // 1. Create a mandate document in Firestore
-      try {
-        mandateRef = await addDoc(collection(db, 'mandates'), {
-          title: formData.nomeOperacao || formData.directiveNo || 'Mandado sem título',
-          data: formData,
-          ownerId: user.uid,
-          sharedWith: [recipient.uid],
-          status: 'Pendente',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-        setActiveMandateId(mandateRef.id);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.CREATE, 'mandates');
+      let mandateId = activeMandateId;
+      
+      // 1. Save or Update the document
+      if (mandateId) {
+        // UPDATE EXISTING
+        try {
+          await updateDoc(doc(db, 'mandates', mandateId), {
+            data: formData,
+            sharedWith: arrayUnion(recipient.uid),
+            updatedAt: serverTimestamp()
+          });
+        } catch (e) {
+          handleFirestoreError(e, OperationType.UPDATE, `mandates/${mandateId}`);
+        }
+      } else {
+        // CREATE NEW
+        try {
+          const mandateRef = await addDoc(collection(db, 'mandates'), {
+            title: formData.nomeOperacao || formData.directiveNo || 'Mandado sem título',
+            data: formData,
+            ownerId: user.uid,
+            sharedWith: [recipient.uid],
+            status: isMagistrateRole(profile.role) ? 'Aprovado' : 'Pendente',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+          mandateId = mandateRef.id;
+          setActiveMandateId(mandateRef.id);
+        } catch (e) {
+          handleFirestoreError(e, OperationType.CREATE, 'mandates');
+        }
       }
       
-      if (!mandateRef) return;
+      if (!mandateId) return;
 
       // 2. Send an email notification
       try {
-        const mandateUrl = `${window.location.origin}${window.location.pathname}?id=${mandateRef.id}&mode=juiz`;
+        const mandateUrl = `${window.location.origin}${window.location.pathname}?id=${mandateId}&mode=juiz`;
+        const isFromMagistrate = isMagistrateRole(profile.role);
         
         await addDoc(collection(db, 'emails'), {
           fromId: user.uid,
           fromEmail: user.email,
           toId: recipient.uid,
           toEmail: recipient.email,
-          subject: `Novo Mandado para Revisão: ${formData.nomeOperacao || formData.directiveNo}`,
-          body: `Olá, ${recipient.displayName}.\n\nUm novo mandado foi enviado para sua revisão.\n\nOperação: ${formData.nomeOperacao || 'N/A'}\nDirective No: ${formData.directiveNo || 'N/A'}\n\nLink Direto: ${mandateUrl}\n\nVocê pode revisar o documento diretamente pelo sistema de e-mails clicando no anexo abaixo ou abrir o link acima.`,
-          attachmentId: mandateRef.id,
+          subject: `${isFromMagistrate ? 'Mandado Encaminhado' : 'Novo Mandado para Revisão'}: ${formData.nomeOperacao || formData.directiveNo}`,
+          body: `Olá, ${recipient.displayName}.\n\nUm mandado foi encaminhado para você por ${profile.displayName}.\n\nOperação: ${formData.nomeOperacao || 'N/A'}\nStatus: ${formData.statusMandado || 'N/A'}\n\nLink Direto: ${mandateUrl}\n\nVocê pode revisar o documento diretamente pelo sistema de e-mails clicando no anexo abaixo.`,
+          attachmentId: mandateId,
           attachmentType: 'mandate',
           read: false,
           timestamp: serverTimestamp()
@@ -459,8 +482,8 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
         handleFirestoreError(e, OperationType.CREATE, 'emails');
       }
 
-      alert('Mandado enviado com sucesso para o juiz!');
-      setShowJudgeList(false);
+      alert('Mandado enviado/encaminhado com sucesso!');
+      setShowRecipientList(false);
     } catch (error: any) {
       console.error("Erro ao enviar mandado:", error);
       alert('Erro ao enviar mandado: ' + error.message);
@@ -507,7 +530,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
   };
 
   const isPromotor = profile?.role?.toLowerCase().includes('promotor');
-  const canEditFields = !isSignedMode && (!isJuizMode || isPromotor);
+  const canEditFields = !isSignedMode;
 
   return (
     <Rnd
@@ -571,6 +594,13 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                   {isSignedMode ? 'Documento Assinado' : isJuizMode ? 'Revisão e Assinatura do Juiz' : 'Formulário de Solicitação'}
                 </h2>
                 <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => { setShowRecipientList(true); fetchRecipients(); }}
+                    className="px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20"
+                  >
+                    <Send className="w-4 h-4" />
+                    Enviar / Encaminhar
+                  </button>
                   {!isJuizMode && (
                     <>
                       <button 
@@ -586,13 +616,6 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                         title="Salvar Rascunho"
                       >
                         <Save className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => { setShowJudgeList(true); fetchJudges(); }}
-                        className="px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20"
-                      >
-                        <Send className="w-4 h-4" />
-                        Enviar
                       </button>
                     </>
                   )}
@@ -770,9 +793,9 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
           <DocumentPreview formData={formData} onBack={() => setView('form')} />
         )}
       </div>
-      {/* Judge Selection Modal */}
+      {/* Recipient Selection Modal */}
       <AnimatePresence>
-        {showJudgeList && (
+        {showRecipientList && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -788,18 +811,18 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
               <div className="flex items-center justify-between p-4 border-b border-slate-800">
                 <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                   <User className="w-5 h-5 text-blue-400" />
-                  Selecionar Juiz / DOJ
+                  {isMagistrateRole(profile?.role) ? 'Encaminhar Mandado' : 'Enviar para Magistrado'}
                 </h3>
                 <div className="flex items-center gap-2">
                   <button 
-                    onClick={fetchJudges}
+                    onClick={fetchRecipients}
                     className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded transition-colors"
                     title="Atualizar Lista"
                   >
                     <RefreshCw className="w-4 h-4" />
                   </button>
                   <button 
-                    onClick={() => setShowJudgeList(false)}
+                    onClick={() => setShowRecipientList(false)}
                     className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
                   >
                     <X className="w-5 h-5" />
@@ -808,30 +831,30 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
               </div>
               
               <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                {loadingJudges ? (
+                {loadingRecipients ? (
                   <div className="flex flex-col items-center justify-center py-12 gap-3">
                     <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-                    <p className="text-sm text-slate-400">Buscando magistrados...</p>
+                    <p className="text-sm text-slate-400">Buscando usuários...</p>
                   </div>
-                ) : judges.length === 0 ? (
+                ) : recipients.length === 0 ? (
                   <div className="text-center text-slate-500 py-8">
-                    Nenhum juiz ou membro do DOJ encontrado.
+                    Nenhum destinatário encontrado.
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {judges.map(judge => (
+                    {recipients.map(item => (
                       <button 
-                        key={judge.uid}
+                        key={item.uid}
                         disabled={isSending}
-                        onClick={() => handleSendToJudge(judge)}
+                        onClick={() => handleSendOrForward(item)}
                         className="w-full bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex items-center gap-3 hover:border-blue-500/50 hover:bg-slate-800 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group"
                       >
                         <div className="w-10 h-10 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400 font-bold group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                          {judge.displayName?.[0].toUpperCase() || 'J'}
+                          {item.displayName?.[0].toUpperCase() || 'U'}
                         </div>
                         <div className="flex-1">
-                          <h4 className="font-medium text-slate-200">{judge.displayName}</h4>
-                          <p className="text-xs text-slate-500 uppercase tracking-wider">{judge.role}</p>
+                          <h4 className="font-medium text-slate-200">{item.displayName}</h4>
+                          <p className="text-xs text-slate-500 uppercase tracking-wider">{item.role}</p>
                         </div>
                         <Send className="w-4 h-4 text-slate-600 group-hover:text-blue-400" />
                       </button>
