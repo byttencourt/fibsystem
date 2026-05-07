@@ -384,7 +384,13 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   const [isSending, setIsSending] = useState(false);
   const isRemoteUpdate = useRef(false);
   const lastLocalUpdate = useRef<number>(Date.now());
-  const trackLocalUpdate = () => { if (!isRemoteUpdate.current) lastLocalUpdate.current = Date.now(); };
+  const hasUnsavedLocalChanges = useRef(false);
+  const trackLocalUpdate = () => { 
+    if (!isRemoteUpdate.current) {
+      lastLocalUpdate.current = Date.now(); 
+      hasUnsavedLocalChanges.current = true;
+    }
+  };
   
   const isMagistrateRole = (role?: string) => {
     if (!role) return false;
@@ -459,6 +465,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   const saveReport = async (isAutoSave = false, additionalSharedUser?: string): Promise<string | null> => {
     if (!user) return null;
     if (!isAutoSave) setSalvando(true);
+    hasUnsavedLocalChanges.current = false;
     let finalId = reportId;
     try {
       // Remove any undefined properties using JSON stringify/parse
@@ -497,6 +504,11 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     } catch (error) {
       if (!isAutoSave) {
         console.error("Erro ao salvar:", error);
+        alert('Falha ao salvar no servidor. Baixando um backup local automaticamente para não perder seu progresso.');
+        exportToJSON();
+      } else {
+        // If autosave fails, maybe we also want to silently alert or just backup?
+        // Since autosave could spam, we optionally just export if it's not autosave.
       }
       return null;
     } finally {
@@ -593,11 +605,11 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
 
   // Auto-save logic
   useEffect(() => {
-    if (!isCollaborative || !reportId || isRemoteUpdate.current) return;
+    if (!isCollaborative || !reportId || isRemoteUpdate.current || !hasUnsavedLocalChanges.current) return;
 
     const timer = setTimeout(() => {
       saveReport(true);
-    }, 2000); // Debounce save 2s
+    }, 5000); // Debounce save 5s
 
     return () => clearTimeout(timer);
   }, [pages, metadata, coverElements, isCollaborative, reportId]);
@@ -875,6 +887,37 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     }
   };
 
+  const exportToJSON = () => {
+    const dataObj = { metadata, pages, coverElements };
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dataObj, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `bkp_relatorio_${metadata.directiveNo || 'novo'}_${Date.now()}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const obj = JSON.parse(event.target?.result as string);
+        if (obj.metadata) setMetadata(obj.metadata);
+        if (obj.pages) setPages(obj.pages);
+        if (obj.coverElements) setCoverElements(obj.coverElements);
+        trackLocalUpdate();
+        alert('Backup importado com sucesso!');
+      } catch(err) {
+        alert('Erro ao carregar arquivo de backup válido.');
+      }
+      e.target.value = ''; // Reset
+    };
+    reader.readAsText(file);
+  };
+
   const exportSingleImage = async (element: HTMLElement, filename: string, bgColor: string = 'rgba(0,0,0,0)') => {
     const blob = await toBlob(element, { pixelRatio: 2, backgroundColor: bgColor });
     if (!blob) throw new Error('Falha ao gerar');
@@ -1026,6 +1069,17 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
             {isCollaborative ? 'Sync' : 'Off'}
           </button>
           
+          <button onClick={exportToJSON} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors border border-slate-600/50">
+            <ArrowDownToLine className="w-4 h-4" />
+            <span className="hidden sm:inline">Exportar BKP</span>
+          </button>
+
+          <label className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors border border-slate-600/50 cursor-pointer">
+            <MoveUpRight className="w-4 h-4" />
+            <span className="hidden sm:inline">Importar BKP</span>
+            <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
+          </label>
+
           <button onClick={exportDocument} disabled={isExporting} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm transition-colors border border-blue-400/20 min-w-[140px] justify-center">
             {isExporting ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4" />}
             {isExporting ? 'Exportando...' : 'Baixar Imagens'}
@@ -1161,6 +1215,11 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                 <div 
                   className="document-page relative w-[794px] h-[1123px] bg-white shadow-xl flex flex-col z-10 overflow-hidden"
                 >
+                  {/* Guia de Margem Esquerda */}
+                  {!isExporting && !isSignedMode && (
+                    <div className="absolute left-[70px] top-0 bottom-0 w-px border-l-2 border-dashed border-blue-500/30 pointer-events-none z-0" title="Guia de Margem Esquerda"></div>
+                  )}
+
                   {sealBase64 && (
                     <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none overflow-hidden z-0">
                       <img src={sealBase64} alt="" className="w-[600px] h-[600px] object-contain grayscale" />
