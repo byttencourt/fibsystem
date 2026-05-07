@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Minus, Square, Mail, Send, ChevronLeft, 
   Trash2, Search, Inbox, SendHorizontal, Paperclip, 
-  ExternalLink, User, Clock, Loader2, RefreshCw, FileText
+  ExternalLink, User, Clock, Loader2, RefreshCw, FileText, Reply
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Rnd } from 'react-rnd';
@@ -58,6 +58,15 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
   const [sending, setSending] = useState(false);
   const [availableReports, setAvailableReports] = useState<{id: string, title: string}[]>([]);
   const [showAttachments, setShowAttachments] = useState(false);
+  const [allUsers, setAllUsers] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (view === 'compose' && allUsers.length === 0) {
+      getDocs(collection(db, 'users')).then(snap => {
+        setAllUsers(snap.docs.map(d => d.data().email as string));
+      });
+    }
+  }, [view]);
 
   useEffect(() => {
     if (!user) return;
@@ -246,7 +255,7 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
               </div>
 
               <form onSubmit={handleSend} className="space-y-4">
-                <div className="grid grid-cols-[100px_1fr] items-center border-b border-white/5 pb-2">
+                <div className="grid grid-cols-[100px_1fr] items-center border-b border-white/5 pb-2 relative">
                   <span className="text-xs font-bold text-slate-500 uppercase">Para:</span>
                   <input 
                     type="email" 
@@ -255,7 +264,13 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                     onChange={(e) => setToEmail(e.target.value)}
                     className="bg-transparent text-sm text-white focus:outline-none w-full" 
                     placeholder="nome@email.gov"
+                    list="registered-emails"
                   />
+                  <datalist id="registered-emails">
+                    {allUsers.map(email => (
+                      <option key={email} value={email} />
+                    ))}
+                  </datalist>
                 </div>
                 <div className="grid grid-cols-[100px_1fr] items-center border-b border-white/5 pb-2">
                   <span className="text-xs font-bold text-slate-500 uppercase">Assunto:</span>
@@ -330,6 +345,20 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
               <div className="flex items-center justify-between mb-8">
                 <button onClick={() => setSelectedEmail(null)} className="p-2 hover:bg-white/5 rounded-full"><ChevronLeft className="w-5 h-5 text-slate-400"/></button>
                 <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => {
+                      setView('compose');
+                      setToEmail(selectedEmail.fromEmail === user?.email ? selectedEmail.toEmail : selectedEmail.fromEmail);
+                      setSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
+                      setBody(`\n\n--- Mensagem Original ---\nDe: ${selectedEmail.fromEmail}\nData: ${new Date(selectedEmail.timestamp?.seconds * 1000).toLocaleString()}\n\n${selectedEmail.body}`);
+                      setAttachment(null);
+                      setSelectedEmail(null);
+                    }}
+                    className="p-2 hover:bg-white/5 rounded text-slate-500 hover:text-white transition-colors"
+                    title="Responder"
+                  >
+                    <Reply className="w-5 h-5"/>
+                  </button>
                   <button 
                     onClick={() => handleDelete(selectedEmail.id)}
                     className="p-2 hover:bg-red-500/20 rounded text-slate-500 hover:text-red-500 transition-colors"

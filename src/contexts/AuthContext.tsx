@@ -3,7 +3,7 @@ import { User as FirebaseUser, onAuthStateChanged, signOut as firebaseSignOut } 
 import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
-export type UserRole = 'admin' | 'doj' | 'fib' | 'judge' | 'lspd';
+export type UserRole = 'admin' | 'doj' | 'fib' | 'judge';
 export type UserStatus = 'pending' | 'active' | 'inactive';
 
 export interface UserProfile {
@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             uid: firebaseUser.uid,
             email: firebaseUser.email || '',
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Novo Usuário',
-            role: isAdminEmail ? 'admin' : 'lspd',
+            role: isAdminEmail ? 'admin' : 'fib',
             status: isAdminEmail ? 'active' : 'pending',
             createdAt: new Date().toISOString()
           };

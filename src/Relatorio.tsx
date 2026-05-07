@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { 
   ChevronLeft, Download, Image as ImageIcon, Type, Save, Square,
   Trash2, Check, Copy, FileText, Maximize2, Minimize2, X, PlusCircle, Trash,
-  Circle, Minus, ArrowDownToLine, MoveUpRight, PenTool, Highlighter, Loader2
+  Circle, Minus, ArrowDownToLine, MoveUpRight, PenTool, Highlighter, Loader2, Move, Send
 } from 'lucide-react';
 import { toBlob } from 'html-to-image';
 import { Rnd } from 'react-rnd';
@@ -11,7 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useAuth, OperationType, handleFirestoreError } from './contexts/AuthContext';
 import { db } from './lib/firebase';
 import { 
-  collection, addDoc, updateDoc, doc, getDoc, 
+  collection, addDoc, updateDoc, doc, getDoc, getDocs, query, arrayUnion,
   serverTimestamp, onSnapshot 
 } from 'firebase/firestore';
 
@@ -43,6 +43,7 @@ export interface RelatorioMetadata {
   operationName: string;
   issueDate: string;
   agentName: string;
+  diretorName?: string;
   classification: string;
   agenteAssinatura?: string;
   diretorAssinatura?: string;
@@ -131,11 +132,16 @@ function DraggableElement({
       disableDragging={isEditing || readOnly}
       enableResizing={!isEditing && !readOnly}
       bounds="parent"
+      dragHandleClassName="drag-handle"
       className={`group ${selected && !readOnly ? 'ring-2 ring-blue-500/50' : ''}`}
       style={{ zIndex: selected ? 10 : 1 }}
     >
       {selected && !isEditing && !readOnly && (
         <div className="absolute -top-12 left-0 bg-slate-800 text-white p-1 rounded shadow flex gap-1 items-center z-50 whitespace-nowrap">
+          <div className="drag-handle flex items-center justify-center w-6 h-6 hover:bg-slate-700 bg-blue-600 rounded cursor-move mr-1" title="Mover Elemento">
+            <Move className="w-3.5 h-3.5" />
+          </div>
+          <div className="h-4 w-px bg-slate-600 mr-1"></div>
            {el.type === 'image' && (
              <>
                <button onClick={() => onChange({ imageStyle: 'normal' })} className={`px-2 py-1 text-xs rounded ${(!el.imageStyle || el.imageStyle === 'normal') ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>Padrão</button>
@@ -162,8 +168,8 @@ function DraggableElement({
                <button onClick={() => onChange({ textColor: '#000000' })} className="w-4 h-4 rounded-full bg-black border hover:scale-110 border border-slate-600"></button>
                <button onClick={() => onChange({ textColor: '#3b82f6' })} className="w-4 h-4 rounded-full bg-blue-500 hover:scale-110 border border-slate-600"></button>
                <div className="h-4 w-px bg-slate-600 mx-1"></div>
-               <button onClick={() => onChange({ angle: (el.angle ?? 0) - 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Esquerda">↺</button>
-               <button onClick={() => onChange({ angle: (el.angle ?? 0) + 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Direita">↻</button>
+               <button onClick={() => onChange({ angle: (el.angle ?? 0) - 45 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Esquerda">↺</button>
+               <button onClick={() => onChange({ angle: (el.angle ?? 0) + 45 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Direita">↻</button>
                <div className="h-4 w-px bg-slate-600 mx-1"></div>
              </>
            )}
@@ -173,8 +179,8 @@ function DraggableElement({
                <button onClick={() => onChange({ textColor: '#000000' })} className="w-4 h-4 rounded-full bg-black hover:scale-110 border border-slate-600" title="Censura Preta"></button>
                <button onClick={() => onChange({ textColor: '#fef08a' })} className="w-4 h-4 rounded-full bg-yellow-300 hover:scale-110 border border-slate-600" title="Marca Texto Amarelo"></button>
                <div className="h-4 w-px bg-slate-600 mx-1"></div>
-               <button onClick={() => onChange({ angle: (el.angle ?? 0) - 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Esquerda">↺</button>
-               <button onClick={() => onChange({ angle: (el.angle ?? 0) + 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Direita">↻</button>
+               <button onClick={() => onChange({ angle: (el.angle ?? 0) - 45 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Esquerda">↺</button>
+               <button onClick={() => onChange({ angle: (el.angle ?? 0) + 45 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Direita">↻</button>
                <div className="h-4 w-px bg-slate-600 mx-1"></div>
              </>
            )}
@@ -189,8 +195,8 @@ function DraggableElement({
                <button onClick={() => onChange({ fontSize: (el.fontSize || 32) - 4 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Diminuir">A-</button>
                <button onClick={() => onChange({ fontSize: (el.fontSize || 32) + 4 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Aumentar">A+</button>
                <div className="h-4 w-px bg-slate-600 mx-1"></div>
-               <button onClick={() => onChange({ angle: (el.angle ?? -15) - 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Esquerda">↺</button>
-               <button onClick={() => onChange({ angle: (el.angle ?? -15) + 15 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Direita">↻</button>
+               <button onClick={() => onChange({ angle: (el.angle ?? -15) - 45 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Esquerda">↺</button>
+               <button onClick={() => onChange({ angle: (el.angle ?? -15) + 45 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700" title="Girar Direita">↻</button>
                <div className="h-4 w-px bg-slate-600 mx-1"></div>
              </>
            )}
@@ -356,7 +362,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   const [pages, setPages] = useState<EditorPage[]>([]);
   const [coverElements, setCoverElements] = useState<ReportElement[]>([]);
   const [isSignedMode, setIsSignedMode] = useState(false);
-  const [isDiretorMode, setIsDiretorMode] = useState(false);
   
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -368,11 +373,19 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   const docRef = useRef<HTMLDivElement>(null);
   const coverRef = useRef<HTMLDivElement>(null);
   const [salvando, setSalvando] = useState(false);
+  const [salvoFeedback, setSalvoFeedback] = useState(false);
+  const [showLoadModal, setShowLoadModal] = useState(false);
+  const [loadIdInput, setLoadIdInput] = useState('');
+  const [recentReports, setRecentReports] = useState<{id: string, title: string, updatedAt: any}[]>([]);
+  const [isCollaborative, setIsCollaborative] = useState(false);
+  const [showRecipientList, setShowRecipientList] = useState(false);
+  const [recipients, setRecipients] = useState<any[]>([]);
+  const [loadingRecipients, setLoadingRecipients] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const isRemoteUpdate = useRef(false);
+  const lastLocalUpdate = useRef<number>(Date.now());
+  const trackLocalUpdate = () => { if (!isRemoteUpdate.current) lastLocalUpdate.current = Date.now(); };
   
-  const [drawMode, setDrawMode] = useState(false);
-  const [activeDrawPage, setActiveDrawPage] = useState<string | null>(null);
-  const [currentPathPoints, setCurrentPathPoints] = useState<{x:number, y:number}[]>([]);
-
   const isMagistrateRole = (role?: string) => {
     if (!role) return false;
     const r = role.toLowerCase();
@@ -384,7 +397,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     return magistrateRoles.includes(r);
   };
 
-  const loadReport = useCallback(async (id: string) => {
+  const loadReport = useCallback(async (id: string, skipSync?: boolean) => {
     setLoading(true);
     setReportId(id);
     try {
@@ -394,12 +407,11 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
         const data = docSnap.data();
         console.log("Relatorio: Dados recuperados:", data);
         
+        isRemoteUpdate.current = true;
         setMetadata(data.metadata || DEFAULT_METADATA);
         
         if (!data.pages || data.pages.length === 0) {
-           // Might be legacy format
            if (data.objetivo || data.historico || data.conclusao) {
-             console.log("Relatorio: Detectado formato legado, migrando...");
              setPages(migrateLegacyData(data));
            } else {
              setPages([]);
@@ -410,50 +422,185 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
         
         setCoverElements(data.coverElements || []);
         
-        // Verifica se é um magistrado abrindo
-        if (profile && isMagistrateRole(profile.role)) {
-           console.log("Relatorio: Abrindo no modo revisão (Magistrado)");
-        }
+        if (!skipSync) setIsCollaborative(true);
+      } else {
+        alert('Relatório não encontrado.');
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, `reports/${id}`);
     } finally {
       setLoading(false);
+      isRemoteUpdate.current = false;
     }
   }, [profile]);
 
-  const saveReport = async () => {
+  const fetchRecentReports = async () => {
     if (!user) return;
-    setSalvando(true);
     try {
-      const reportData: any = {
+      const { query, collection, where, orderBy, limit, getDocs } = await import('firebase/firestore');
+      const q = query(
+        collection(db, 'reports'),
+        where('ownerId', '==', user.uid),
+        orderBy('updatedAt', 'desc'),
+        limit(10)
+      );
+      const querySnapshot = await getDocs(q);
+      const reports = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        title: doc.data().title || 'Sem Título',
+        updatedAt: doc.data().updatedAt
+      }));
+      setRecentReports(reports);
+    } catch (error) {
+      console.error("Erro ao buscar relatórios recentes:", error);
+    }
+  };
+
+  const saveReport = async (isAutoSave = false, additionalSharedUser?: string): Promise<string | null> => {
+    if (!user) return null;
+    if (!isAutoSave) setSalvando(true);
+    let finalId = reportId;
+    try {
+      // Remove any undefined properties using JSON stringify/parse
+      const cleanData = JSON.parse(JSON.stringify({
         metadata,
         pages,
         coverElements,
         title: metadata.operationName || 'Relatório sem Título',
+      }));
+      
+      const reportData: any = {
+        ...cleanData,
         updatedAt: serverTimestamp()
       };
 
-      if (reportId) {
-        // Se estamos editando, não enviamos o ownerId para não violar regras de segurança
-        // se o usuário atual for um juiz (membro de sharedWith).
-        await updateDoc(doc(db, 'reports', reportId), reportData);
+      if (finalId) {
+        if (additionalSharedUser) {
+           reportData.sharedWith = arrayUnion(additionalSharedUser);
+        }
+        await updateDoc(doc(db, 'reports', finalId), reportData);
       } else {
-        // Novo relatório
-        await addDoc(collection(db, 'reports'), {
+        const docRef = await addDoc(collection(db, 'reports'), {
           ...reportData,
           ownerId: user.uid,
           createdAt: serverTimestamp(),
-          sharedWith: []
+          sharedWith: additionalSharedUser ? [additionalSharedUser] : []
         });
+        finalId = docRef.id;
+        setReportId(finalId);
       }
-      alert('Relatório salvo com sucesso!');
+      if (!isAutoSave) {
+        setSalvoFeedback(true);
+        setTimeout(() => setSalvoFeedback(false), 3000);
+      }
+      return finalId;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'reports');
+      if (!isAutoSave) {
+        console.error("Erro ao salvar:", error);
+      }
+      return null;
     } finally {
-      setSalvando(false);
+      if (!isAutoSave) setSalvando(false);
     }
   };
+
+  const fetchRecipients = async () => {
+    setLoadingRecipients(true);
+    try {
+      console.log("Relatorio: Buscando destinatários...");
+      let firestoreUsers: any[] = [];
+      const q = query(collection(db, 'users'));
+      const querySnapshot = await getDocs(q);
+      firestoreUsers = querySnapshot.docs
+        .map(doc => ({ uid: doc.id, ...(doc.data() as any) }))
+        .filter(u => u.uid !== user?.uid);
+        
+      console.log(`Relatorio: Sucesso ao carregar ${firestoreUsers.length} destinatários.`);
+      setRecipients(firestoreUsers);
+    } catch (error) {
+      console.error("Erro ao buscar destinatários:", error);
+    } finally {
+      setLoadingRecipients(false);
+    }
+  };
+
+  const handleSendOrForward = async (recipient: any) => {
+    if (!user || !profile) return;
+    
+    setIsSending(true);
+    try {
+      // We force a save and pass the recipient UID so they are in 'sharedWith' instantly
+      const finalId = await saveReport(false, recipient.uid);
+      
+      if (!finalId) {
+        setIsSending(false);
+        return;
+      }
+
+      const reportUrl = `${window.location.origin}${window.location.pathname}?reportId=${finalId}`;
+      
+      await addDoc(collection(db, 'emails'), {
+        fromId: user.uid,
+        fromEmail: user.email,
+        toId: recipient.uid,
+        toEmail: recipient.email,
+        subject: `Relatório Compartilhado: ${metadata.operationName || 'Relatório de Investigação'}`,
+        body: `Olá, ${recipient.displayName || 'Colega'}.\n\nUm relatório foi compartilhado com você por ${profile.displayName}.\n\nPara visualizar e colaborar, clique no anexo abaixo para abri-lo diretamente no sistema e ligue a chave COLABORATIVO, ou acesse o link direto:\n${reportUrl}`,
+        attachmentId: finalId,
+        attachmentType: 'report',
+        read: false,
+        timestamp: serverTimestamp()
+      });
+
+      alert('Relatório compartilhado com sucesso!');
+      setShowRecipientList(false);
+    } catch (error: any) {
+      console.error("Erro ao compartilhar relatório", error);
+      alert('Erro ao enviar relatório: ' + error.message);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  // Real-time listener
+  useEffect(() => {
+    if (!reportId || !isCollaborative) return;
+
+    console.log("Relatorio: Iniciando listener real-time para:", reportId);
+    const unsubscribe = onSnapshot(doc(db, 'reports', reportId), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        
+        if (!snapshot.metadata.hasPendingWrites) {
+          // Prevent race conditions: Ignore remote updates if user typed locally in the last 3000ms
+          const timeSinceLocalUpdate = Date.now() - lastLocalUpdate.current;
+          if (timeSinceLocalUpdate > 3000) {
+            console.log("Relatorio: Recebendo atualização remota");
+            isRemoteUpdate.current = true;
+            setMetadata(data.metadata || DEFAULT_METADATA);
+            setPages(data.pages || []);
+            setCoverElements(data.coverElements || []);
+            setTimeout(() => { isRemoteUpdate.current = false; }, 100);
+          } else {
+            console.log("Relatorio: Ignorando atualização remota (usuário está digitando ativamente)", timeSinceLocalUpdate);
+          }
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [reportId, isCollaborative]);
+
+  // Auto-save logic
+  useEffect(() => {
+    if (!isCollaborative || !reportId || isRemoteUpdate.current) return;
+
+    const timer = setTimeout(() => {
+      saveReport(true);
+    }, 2000); // Debounce save 2s
+
+    return () => clearTimeout(timer);
+  }, [pages, metadata, coverElements, isCollaborative, reportId]);
 
   useEffect(() => {
     // Listen for custom open event
@@ -518,10 +665,27 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   }, [profile, loadReport]);
 
   const handleMetadataChange = (key: keyof RelatorioMetadata, value: string) => {
-    setMetadata(prev => ({ ...prev, [key]: value }));
+    trackLocalUpdate();
+    setMetadata(prev => {
+      const updated = { ...prev, [key]: value };
+      // Sync signature with names automatically
+      if (key === 'agentName') {
+        updated.agenteAssinatura = value;
+      }
+      if (key === 'diretorName') {
+        updated.diretorAssinatura = value;
+      }
+      return updated;
+    });
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    alert('Código ID (Endereço) do Relatório copiado para a área de transferência! Envie este código para quem precisa ler ou editar.');
   };
 
   const addElement = (pageId: string, type: ElementType, customContent?: string) => {
+    trackLocalUpdate();
     let content = 'Novo Texto';
     let width = 300;
     let height = 100;
@@ -587,6 +751,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const updateElement = (pageId: string, elId: string, updates: Partial<ReportElement>) => {
+    trackLocalUpdate();
     if (pageId === 'cover') {
       setCoverElements(prev => prev.map(el => el.id === elId ? { ...el, ...updates } : el));
       return;
@@ -637,6 +802,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const moveElementToNextPage = (pageIndex: number, elId: string) => {
+    trackLocalUpdate();
     setPages(prev => {
       const newPages = [...prev];
       const sourcePage = newPages[pageIndex];
@@ -666,6 +832,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const deleteElement = (pageId: string, elId: string) => {
+    trackLocalUpdate();
     if (pageId === 'cover') {
       setCoverElements(prev => prev.filter(el => el.id !== elId));
       setSelectedElement(null);
@@ -681,6 +848,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const addCoverElement = (type: ElementType) => {
+    trackLocalUpdate();
     const el: ReportElement = {
       id: uuidv4(),
       type,
@@ -696,10 +864,12 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const addPage = () => {
+    trackLocalUpdate();
     setPages([...pages, { id: uuidv4(), elements: [] }]);
   };
 
   const deletePage = (id: string) => {
+    trackLocalUpdate();
     if (pages.length > 1) {
       setPages(pages.filter(p => p.id !== id));
     }
@@ -793,52 +963,72 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
       {/* Toolbar */}
       <div className="h-14 bg-slate-800 flex items-center justify-between px-4 shrink-0 border-b border-slate-700">
         <div className="flex items-center gap-2">
-          <div className="text-sm font-bold text-slate-300 mr-4">DADOS DE CAPA:</div>
-          <input type="text" placeholder="Op. Name" value={metadata.operationName} onChange={e => handleMetadataChange('operationName', e.target.value)} className="w-32 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
-          <input type="text" placeholder="Directive" value={metadata.directiveNo} onChange={e => handleMetadataChange('directiveNo', e.target.value)} className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
-          <input type="text" placeholder="Agent" value={metadata.agentName} onChange={e => handleMetadataChange('agentName', e.target.value)} className="w-32 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+          {reportId && (
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 mr-2 group">
+              <span className="text-[10px] font-mono text-slate-500 uppercase">DOC ID:</span>
+              <span className="text-[10px] font-mono text-blue-400 select-all">{reportId.substring(0, 12)}...</span>
+              <button 
+                onClick={(e) => { e.stopPropagation(); copyToClipboard(reportId); }}
+                className="p-1 text-slate-500 hover:text-white transition-colors"
+                title="Copiar ID Completo para Compartilhar"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+          <button 
+            onClick={() => { setShowLoadModal(true); fetchRecentReports(); }}
+            className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-xs transition-colors"
+          >
+            <ArrowDownToLine className="w-3.5 h-3.5" />
+            Abrir Relatório
+          </button>
           <div className="h-6 w-px bg-slate-700 mx-2"></div>
-          <div className="flex items-center gap-2 pr-4 border-r border-slate-700">
-            <span className="text-[10px] font-bold text-slate-500 uppercase">Assinaturas:</span>
-            <input 
-              type="text" 
-              placeholder="Assin. Agente" 
-              value={metadata.agenteAssinatura || ''} 
-              onChange={e => handleMetadataChange('agenteAssinatura', e.target.value)} 
-              className="w-28 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white font-signature" 
-            />
-            <input 
-              type="text" 
-              placeholder="Assin. Diretoria" 
-              value={metadata.diretorAssinatura || ''} 
-              onChange={e => handleMetadataChange('diretorAssinatura', e.target.value)} 
-              className="w-28 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white font-signature" 
-            />
-            <button 
-              onClick={() => setIsDiretorMode(!isDiretorMode)}
-              className={`px-2 py-1 text-[10px] font-bold rounded border transition-colors ${isDiretorMode ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
-            >
-              MODO DIRETORIA
-            </button>
-          </div>
+          <div className="text-sm font-bold text-slate-300 mr-4 tracking-tight">CAPA:</div>
+          <input type="text" placeholder="Nome da Operação" value={metadata.operationName} onChange={e => handleMetadataChange('operationName', e.target.value)} className="w-36 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" />
+          <input type="text" placeholder="Nº Diretiva" value={metadata.directiveNo} onChange={e => handleMetadataChange('directiveNo', e.target.value)} className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" />
+          <input type="text" placeholder="Nome do Agente" value={metadata.agentName} onChange={e => handleMetadataChange('agentName', e.target.value)} className="w-40 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" title="Assinatura do Agente" />
+          <input type="text" placeholder="Nome do Diretor" value={metadata.diretorName || ''} onChange={e => handleMetadataChange('diretorName', e.target.value)} className="w-40 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" title="Assinatura da Diretoria (Opcional)" />
         </div>
 
         <div className="flex items-center gap-2">
           <button 
-            onClick={() => { setDrawMode(!drawMode); setSelectedElement(null); }} 
-            className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-colors font-medium border ${drawMode ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
+            onClick={() => setIsSignedMode(!isSignedMode)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-all sm:flex hidden ${isSignedMode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
           >
-            <PenTool className="w-4 h-4" />
-            {drawMode ? 'Desativar Caneta' : 'Caneta Livre'}
+            {isSignedMode ? 'Modo Visualização' : 'Ativar Assinaturas'}
           </button>
           
-          <button onClick={saveReport} disabled={salvando} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors disabled:opacity-50 min-w-[120px] justify-center">
-             {salvando ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4" />}
-             {salvando ? 'Salvando...' : 'Salvar no Banco'}
+          <button 
+            onClick={() => { fetchRecipients(); setShowRecipientList(true); }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all shadow-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-900/20`}
+            title="Enviar/Compartilhar por Email no sistema"
+          >
+            <Send className="w-4 h-4" />
+            <span className="hidden sm:inline">Compartilhar</span>
           </button>
-          <button onClick={exportDocument} disabled={isExporting} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm transition-colors disabled:opacity-50">
-            <Download className="w-4 h-4" />
-            {isExporting ? 'Exportando...' : 'Exportar Tudo'}
+          
+          <button 
+            onClick={() => saveReport()} 
+            disabled={salvando}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all shadow-lg ${salvoFeedback ? 'bg-emerald-600 text-white' : salvando ? 'bg-slate-700 text-slate-400' : 'bg-green-600 hover:bg-green-500 text-white shadow-green-900/20'}`}
+          >
+            {salvando ? <Loader2 className="w-4 h-4 animate-spin" /> : salvoFeedback ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+            {salvando ? 'Salvando...' : salvoFeedback ? 'Salvo!' : 'Salvar'}
+          </button>
+          
+          <button 
+            onClick={() => setIsCollaborative(!isCollaborative)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all shadow-lg ${isCollaborative ? 'bg-blue-600 text-white shadow-blue-900/20' : 'bg-slate-700 text-slate-300'}`}
+            title="Sincronização em tempo real"
+          >
+            <div className={`w-2 h-2 rounded-full ${isCollaborative ? 'bg-green-400 animate-pulse' : 'bg-slate-500'}`}></div>
+            {isCollaborative ? 'Sync' : 'Off'}
+          </button>
+          
+          <button onClick={exportDocument} disabled={isExporting} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm transition-colors border border-blue-400/20 min-w-[140px] justify-center">
+            {isExporting ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4" />}
+            {isExporting ? 'Exportando...' : 'Baixar Imagens'}
           </button>
         </div>
       </div>
@@ -969,66 +1159,8 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
 
                 {/* PAPER */}
                 <div 
-                  className={`document-page relative w-[794px] h-[1123px] bg-white shadow-xl flex flex-col z-10 overflow-hidden ${drawMode ? 'cursor-crosshair' : ''}`}
-                  onPointerDown={(e) => {
-                    if (!drawMode) return;
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
-                    setActiveDrawPage(page.id);
-                    setCurrentPathPoints([{x, y}]);
-                  }}
-                  onPointerMove={(e) => {
-                    if (activeDrawPage !== page.id || currentPathPoints.length === 0) return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
-                    setCurrentPathPoints(prev => [...prev, {x, y}]);
-                  }}
-                  onPointerUp={(e) => {
-                    if (activeDrawPage === page.id && currentPathPoints.length > 1) {
-                       e.currentTarget.releasePointerCapture(e.pointerId);
-                       const minX = Math.min(...currentPathPoints.map(p => p.x));
-                       const minY = Math.min(...currentPathPoints.map(p => p.y));
-                       const maxX = Math.max(...currentPathPoints.map(p => p.x));
-                       const maxY = Math.max(...currentPathPoints.map(p => p.y));
-                       
-                       const normPoints = currentPathPoints.map(p => ({ x: p.x - minX, y: p.y - minY }));
-                       
-                       const newEl: ReportElement = {
-                          id: uuidv4(),
-                          type: 'drawing',
-                          x: minX,
-                          y: minY,
-                          width: Math.max(maxX - minX, 10),
-                          height: Math.max(maxY - minY, 10),
-                          points: normPoints,
-                          content: '',
-                          textColor: '#000000',
-                          angle: 0
-                       };
-                       
-                       setPages(prev => prev.map(p => p.id === page.id ? { ...p, elements: [...p.elements, newEl] } : p));
-                    }
-                    setCurrentPathPoints([]);
-                    setActiveDrawPage(null);
-                  }}
+                  className="document-page relative w-[794px] h-[1123px] bg-white shadow-xl flex flex-col z-10 overflow-hidden"
                 >
-                  {/* Drawing Indicator layer */}
-                  {activeDrawPage === page.id && currentPathPoints.length > 0 && (
-                    <svg className="absolute inset-0 w-full h-full pointer-events-none z-50">
-                       <polyline 
-                         points={currentPathPoints.map(p => `${p.x},${p.y}`).join(' ')} 
-                         fill="none" 
-                         stroke="#000000" 
-                         strokeWidth="3" 
-                         strokeLinecap="round" 
-                         strokeLinejoin="round" 
-                       />
-                    </svg>
-                  )}
-
                   {sealBase64 && (
                     <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none overflow-hidden z-0">
                       <img src={sealBase64} alt="" className="w-[600px] h-[600px] object-contain grayscale" />
@@ -1067,22 +1199,33 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                     {/* Footer Signature Area on Last Page ONLY */}
                     {index === pages.length - 1 && (
                        <div className="absolute bottom-10 w-full flex justify-between px-16 z-0">
-                         <div className="text-center w-56 relative z-0">
-                           {metadata.agenteAssinatura && <div className="absolute bottom-6 w-full text-center pointer-events-none"><span className="font-signature text-4xl text-[#0000a0] -rotate-2 opacity-90">{metadata.agenteAssinatura}</span></div>}
-                           <div className="border-b border-black mb-2"></div>
-                           <p className="text-sm font-bold text-black border-none bg-transparent m-0 p-0">Assinatura do Agente</p>
-                           {!isSignedMode && !metadata.agenteAssinatura && !isDiretorMode && (
-                              <input type="text" placeholder="Assinar (Nome)" className="w-full mt-2 text-xs border rounded px-1 py-1 bg-white/50" onBlur={(e) => handleMetadataChange('agenteAssinatura', e.target.value)} />
-                           )}
+                         {/* Agente Signature */}
+                         <div className="text-center w-72 relative z-0 flex flex-col items-center">
+                           <div className="h-10 w-full relative flex items-center justify-center overflow-hidden">
+                             {metadata.agenteAssinatura && (
+                               <span className="font-signature text-3xl text-[#0000a0] -rotate-1 opacity-90 block truncate w-full text-center px-4">
+                                 {metadata.agenteAssinatura}
+                               </span>
+                             )}
+                           </div>
+                           <div className="border-b border-black w-full mb-1"></div>
+                           <p className="text-[10px] font-bold text-black border-none bg-transparent m-0 p-0 uppercase tracking-widest leading-none">Agente de Investigação</p>
                          </div>
-                         <div className="text-center w-56 relative z-0">
-                           {metadata.diretorAssinatura && <div className="absolute bottom-6 w-full text-center pointer-events-none"><span className="font-signature text-5xl text-black -rotate-2 opacity-90">{metadata.diretorAssinatura}</span></div>}
-                           <div className="border-b border-black mb-2"></div>
-                           <p className="text-sm font-bold text-black border-none bg-transparent m-0 p-0">Assinatura Diretoria</p>
-                           {!isSignedMode && isDiretorMode && !metadata.diretorAssinatura && (
-                              <input type="text" placeholder="Assinar Diretoria" className="w-full mt-2 text-xs border rounded px-1 py-1 bg-white/50" onBlur={(e) => handleMetadataChange('diretorAssinatura', e.target.value)} />
-                           )}
-                         </div>
+
+                         {/* Diretoria Signature - Only shows if name is present */}
+                         {metadata.diretorName && (
+                           <div className="text-center w-72 relative z-0 flex flex-col items-center">
+                             <div className="h-10 w-full relative flex items-center justify-center overflow-hidden">
+                               {metadata.diretorAssinatura && (
+                                 <span className="font-signature text-4xl text-black -rotate-1 opacity-90 block truncate w-full text-center px-4">
+                                   {metadata.diretorAssinatura}
+                                 </span>
+                               )}
+                             </div>
+                             <div className="border-b border-black w-full mb-1"></div>
+                             <p className="text-[10px] font-bold text-black border-none bg-transparent m-0 p-0 uppercase tracking-widest leading-none">Diretoria de Operações</p>
+                           </div>
+                         )}
                        </div>
                     )}
                   </div>
@@ -1108,6 +1251,149 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
           </div>
         )}
       </div>
+
+      {/* Load by Code Modal */}
+      {showLoadModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl"
+          >
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-800/50">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <FileText className="w-5 h-5 text-blue-400" />
+                Carregar Relatório
+              </h3>
+              <button 
+                onClick={() => setShowLoadModal(false)}
+                className="p-1 text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-400">Inserir ID ou Código do Relatório:</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={loadIdInput}
+                    onChange={(e) => setLoadIdInput(e.target.value)}
+                    placeholder="Ex: d7a1b... ou ID completo"
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white focus:border-blue-500 outline-none transition-colors"
+                  />
+                  <button 
+                    onClick={() => { if (loadIdInput) { loadReport(loadIdInput); setShowLoadModal(false); } }}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition-colors"
+                  >
+                    Carregar
+                  </button>
+                </div>
+              </div>
+
+              {recentReports.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Recentes</h4>
+                  <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-2 pr-1">
+                    {recentReports.map(report => (
+                      <button 
+                        key={report.id}
+                        onClick={() => { loadReport(report.id); setShowLoadModal(false); }}
+                        className="w-full flex items-center justify-between p-3 bg-slate-800/40 hover:bg-slate-800 rounded-lg border border-slate-800 hover:border-slate-700 transition-all text-left group"
+                      >
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-medium text-slate-200 group-hover:text-blue-400 transition-colors line-clamp-1">{report.title}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">{report.id.substring(0, 8)}...</span>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 text-[10px] text-slate-500">
+                          <span>{report.updatedAt ? new Date(report.updatedAt.seconds * 1000).toLocaleDateString() : '---'}</span>
+                          <ArrowDownToLine className="w-3 h-3 group-hover:text-blue-400 transition-colors" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Compartilhar Modal */}
+      {showRecipientList && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-lg bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]"
+          >
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Send className="w-5 h-5 text-indigo-400" />
+                Compartilhar Relatório
+              </h2>
+              <button 
+                onClick={() => setShowRecipientList(false)}
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                disabled={isSending}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-4 bg-slate-900 border-b border-slate-800">
+              <p className="text-sm text-slate-400 mb-2">
+                Selecione um usuário para encaminhar por e-mail e dar permissão de edição a este relatório. O relatório será salvo automaticamente.
+              </p>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+              {loadingRecipients ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                  <p className="text-sm text-slate-400">Buscando usuários...</p>
+                </div>
+              ) : recipients.length === 0 ? (
+                <div className="text-center text-slate-500 py-8">
+                  Nenhum destinatário encontrado.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {recipients.map(item => (
+                    <button 
+                      key={item.uid}
+                      disabled={isSending}
+                      onClick={() => handleSendOrForward(item)}
+                      className="w-full bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex items-center gap-3 hover:border-indigo-500/50 hover:bg-slate-800 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-indigo-600/20 flex items-center justify-center text-indigo-400 font-bold group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                        {item.displayName?.[0].toUpperCase() || 'U'}
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium text-slate-200 group-hover:text-white flex items-center gap-2">
+                          {item.displayName}
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-slate-700 text-slate-300 font-mono uppercase line-clamp-1">
+                            {item.role || 'Usuário'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-400 truncate">{item.email}</div>
+                      </div>
+                      {isSending ? (
+                        <Loader2 className="w-4 h-4 text-slate-500 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-colors" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
     </motion.div>
   </Rnd>
 );

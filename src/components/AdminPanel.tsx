@@ -220,11 +220,6 @@ export function AdminWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                        <option value="fib">F.I.B</option>
                        <option value="doj">D.O.J</option>
                        <option value="judge">Juiz</option>
-                        <option value="magistrado">Magistrado</option>
-                        <option value="promotor">Promotor</option>
-                        <option value="procurador">Procurador</option>
-                        <option value="diretoria">Diretoria</option>
-                       <option value="lspd">LSPD</option>
                        <option value="admin">Administrador</option>
                      </select>
                    </td>

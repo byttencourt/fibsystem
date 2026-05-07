@@ -177,7 +177,6 @@ export function LoginScreen() {
                 <option value="fib">F.I.B - Federal Investigation Bureau</option>
                 <option value="doj">D.O.J - Department of Justice</option>
                 <option value="judge">Justiça - Juiz</option>
-                <option value="lspd">LSPD - Los Santos Police Department</option>
               </select>
             </div>
           )}
