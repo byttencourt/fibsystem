@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { 
   ChevronLeft, Download, Image as ImageIcon, Type, Save, Square,
   Trash2, Check, Copy, FileText, Maximize2, Minimize2, X, PlusCircle, Trash,
-  Circle, Minus, ArrowDownToLine, MoveUpRight, PenTool, Highlighter, Loader2, Move, Send
+  Circle, Minus, ArrowDownToLine, MoveUpRight, PenTool, Highlighter, Loader2, Move, Send, Undo2
 } from 'lucide-react';
 import { toBlob } from 'html-to-image';
 import { Rnd } from 'react-rnd';
@@ -28,6 +28,7 @@ export interface ReportElement {
   fontSize?: number;
   textColor?: string;
   fontWeight?: string;
+  fontStyle?: string;
   imageStyle?: 'normal' | 'polaroid';
   angle?: number;
   points?: {x: number, y: number}[];
@@ -92,7 +93,7 @@ function migrateLegacyData(legacy: any): EditorPage[] {
 }
 
 function DraggableElement({ 
-  el, selected, onSelect, onChange, onDelete, onMoveToNextPage, readOnly 
+  el, selected, onSelect, onChange, onDelete, onMoveToNextPage, readOnly, boundsSelector
 }: { 
   el: ReportElement;
   selected: boolean;
@@ -101,18 +102,36 @@ function DraggableElement({
   onDelete: () => void;
   onMoveToNextPage?: () => void;
   readOnly: boolean;
+  boundsSelector: string;
 }) {
   const [isEditing, setIsEditing] = useState(false);
-  const [tempText, setTempText] = useState(el.content);
+  const textRef = useRef<HTMLDivElement>(null);
 
-  const handleDoubleClick = () => {
+  // Sync content when not editing
+  useEffect(() => {
+    if (textRef.current && textRef.current.innerHTML !== el.content && !isEditing && el.type === 'text') {
+      textRef.current.innerHTML = el.content;
+    }
+  }, [el.content, isEditing, el.type]);
+
+  // Focus when entering edit mode
+  useEffect(() => {
+    if (isEditing && textRef.current) {
+      textRef.current.focus();
+    }
+  }, [isEditing]);
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
     if (readOnly || el.type !== 'text') return;
     setIsEditing(true);
+    e.stopPropagation();
   };
 
   const handleBlur = () => {
-    setIsEditing(false);
-    onChange({ content: tempText });
+    if (el.type === 'text' && textRef.current) {
+      setIsEditing(false);
+      onChange({ content: textRef.current.innerHTML });
+    }
   };
 
   return (
@@ -131,13 +150,22 @@ function DraggableElement({
       }}
       disableDragging={isEditing || readOnly}
       enableResizing={!isEditing && !readOnly}
-      bounds="parent"
+      bounds={boundsSelector}
       dragHandleClassName="drag-handle"
       className={`group ${selected && !readOnly ? 'ring-2 ring-blue-500/50' : ''}`}
       style={{ zIndex: selected ? 10 : 1 }}
     >
-      {selected && !isEditing && !readOnly && (
-        <div className="absolute -top-12 left-0 bg-slate-800 text-white p-1 rounded shadow flex gap-1 items-center z-50 whitespace-nowrap">
+      {selected && !readOnly && (
+        <div 
+          className="absolute -top-12 left-0 bg-slate-800 text-white p-1 rounded shadow flex gap-1 items-center z-50 whitespace-nowrap"
+          onMouseDown={(e) => {
+            // Prevent blur of contentEditable when clicking toolbar buttons
+            if (!(e.target as Element).closest('input')) {
+              e.preventDefault();
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="drag-handle flex items-center justify-center w-6 h-6 hover:bg-slate-700 bg-blue-600 rounded cursor-move mr-1" title="Mover Elemento">
             <Move className="w-3.5 h-3.5" />
           </div>
@@ -152,12 +180,78 @@ function DraggableElement({
 
            {el.type === 'text' && (
              <>
-               <button onClick={() => onChange({ fontWeight: el.fontWeight === 'bold' ? 'normal' : 'bold' })} className={`px-2 py-1 text-xs rounded ${el.fontWeight === 'bold' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}>B</button>
-               <button onClick={() => onChange({ fontSize: (el.fontSize || 14) - 2 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700">A-</button>
-               <button onClick={() => onChange({ fontSize: (el.fontSize || 14) + 2 })} className="px-2 py-1 text-xs rounded hover:bg-slate-700">A+</button>
+               <button 
+                 onClick={(e) => {
+                   if (isEditing) {
+                     document.execCommand('bold', false, null);
+                   } else {
+                     onChange({ fontWeight: el.fontWeight === 'bold' ? 'normal' : 'bold' });
+                   }
+                 }} 
+                 className={`px-2 py-1 text-xs rounded ${el.fontWeight === 'bold' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}
+               >B</button>
+               <button 
+                 onClick={(e) => {
+                   if (isEditing) {
+                     document.execCommand('italic', false, null);
+                   } else {
+                     onChange({ fontStyle: el.fontStyle === 'italic' ? 'normal' : 'italic' });
+                   }
+                 }} 
+                 className={`px-2 py-1 text-xs rounded ${el.fontStyle === 'italic' ? 'bg-slate-600' : 'hover:bg-slate-700'}`}
+               >I</button>
                <div className="h-4 w-px bg-slate-600 mx-1"></div>
-               <button onClick={() => onChange({ textColor: '#dc2626' })} className="w-4 h-4 rounded-full bg-red-600 hover:scale-110"></button>
-               <button onClick={() => onChange({ textColor: '#000000' })} className="w-4 h-4 rounded-full bg-black border hover:scale-110"></button>
+               <button 
+                 onClick={(e) => {
+                   if (isEditing) {
+                     const currSize = parseInt(document.queryCommandValue('fontSize') || "3");
+                     document.execCommand('fontSize', false, Math.max(1, currSize - 1).toString());
+                   } else {
+                     onChange({ fontSize: (el.fontSize || 14) - 1 });
+                   }
+                 }} 
+                 className="px-2 py-1 text-xs rounded hover:bg-slate-700">A-</button>
+               <button 
+                 onClick={(e) => {
+                   if (isEditing) {
+                     const currSize = parseInt(document.queryCommandValue('fontSize') || "3");
+                     document.execCommand('fontSize', false, Math.min(7, currSize + 1).toString());
+                   } else {
+                     onChange({ fontSize: (el.fontSize || 14) + 1 });
+                   }
+                 }} 
+                 className="px-2 py-1 text-xs rounded hover:bg-slate-700">A+</button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+               <button 
+                 onClick={(e) => {
+                   if (isEditing) {
+                     document.execCommand('insertUnorderedList', false, null);
+                   }
+                 }} 
+                 className="px-2 py-1 text-xs rounded hover:bg-slate-700"
+                 title="Marcador"
+               >•</button>
+               <div className="h-4 w-px bg-slate-600 mx-1"></div>
+               <button 
+                 onClick={(e) => {
+                   if (isEditing) {
+                     document.execCommand('foreColor', false, '#dc2626');
+                   } else {
+                     onChange({ textColor: '#dc2626' });
+                   }
+                 }} 
+                 className="w-4 h-4 rounded-full bg-red-600 hover:scale-110"
+               ></button>
+               <button 
+                 onClick={(e) => {
+                   if (isEditing) {
+                     document.execCommand('foreColor', false, '#000000');
+                   } else {
+                     onChange({ textColor: '#000000' });
+                   }
+                 }} 
+                 className="w-4 h-4 rounded-full bg-black border hover:scale-110"
+               ></button>
                <div className="h-4 w-px bg-slate-600 mx-1"></div>
              </>
            )}
@@ -223,39 +317,44 @@ function DraggableElement({
       <div 
         className="w-full h-full relative" 
         onDoubleClick={handleDoubleClick}
-        onClick={(e) => { e.stopPropagation(); onSelect(); }}
+        onClick={(e) => { 
+          e.stopPropagation(); 
+          if (selected && !isEditing && !readOnly && el.type === 'text') {
+            setIsEditing(true);
+          }
+          onSelect(); 
+        }}
       >
         {el.type === 'text' ? (
-          isEditing ? (
-            <textarea
-              autoFocus
-              className="w-full h-full bg-blue-50/50 border-none outline-none resize-none font-sans"
-              style={{
-                fontSize: el.fontSize || 14,
-                fontWeight: el.fontWeight || 'normal',
-                color: el.textColor || '#000000',
-              }}
-              value={tempText}
-              onChange={(e) => {
-                 setTempText(e.target.value);
-                 if (e.target.scrollHeight > el.height) {
-                    onChange({ height: e.target.scrollHeight });
-                 }
-              }}
-              onBlur={handleBlur}
-            />
-          ) : (
-            <div 
-              className="w-full h-full whitespace-pre-wrap font-sans cursor-text overflow-hidden leading-relaxed"
-              style={{
-                fontSize: el.fontSize || 14,
-                fontWeight: el.fontWeight || 'normal',
-                color: el.textColor || '#000000',
-              }}
-            >
-              {el.content}
-            </div>
-          )
+          <div
+            ref={textRef}
+            contentEditable={!readOnly && isEditing}
+            suppressContentEditableWarning
+            className="w-full h-full whitespace-pre-wrap font-sans overflow-hidden leading-relaxed outline-none [&_ul]:list-disc [&_ul]:list-outside [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:list-outside [&_ol]:pl-5"
+            style={{
+              fontSize: el.fontSize || 14,
+              fontWeight: el.fontWeight || 'normal',
+              fontStyle: el.fontStyle || 'normal',
+              color: el.textColor || '#000000',
+              cursor: isEditing ? 'text' : 'pointer',
+              backgroundColor: isEditing ? 'rgba(59, 130, 246, 0.05)' : 'transparent'
+            }}
+            onBlur={handleBlur}
+            onKeyDown={(e) => {
+              if (e.key === 'Tab') {
+                e.preventDefault();
+                document.execCommand('insertHTML', false, '&nbsp;&nbsp;&nbsp;&nbsp;');
+              }
+            }}
+            onInput={(e) => {
+              if (e.currentTarget.scrollHeight > el.height) {
+                 // Update height only
+                 onChange({ 
+                   height: e.currentTarget.scrollHeight
+                 });
+              }
+            }}
+          />
         ) : el.type === 'image' ? (
           el.imageStyle === 'polaroid' ? (
             <div className="w-full h-full bg-[#f8f8f8] p-3 pb-12 shadow-md border border-slate-200 pointer-events-none relative shadow-[2px_4px_12px_rgba(0,0,0,0.15)] flex flex-col">
@@ -363,6 +462,53 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   const [coverElements, setCoverElements] = useState<ReportElement[]>([]);
   const [isSignedMode, setIsSignedMode] = useState(false);
   
+  // Custom Undo Implementation
+  const stateRef = useRef({ pages, coverElements });
+  useEffect(() => {
+    stateRef.current = { pages, coverElements };
+  }, [pages, coverElements]);
+  
+  const historyRef = useRef<string[]>([]);
+  
+  const saveHistory = useCallback(() => {
+    const current = JSON.stringify(stateRef.current);
+    if (historyRef.current.length === 0 || historyRef.current[historyRef.current.length - 1] !== current) {
+      historyRef.current.push(current);
+      if (historyRef.current.length > 50) historyRef.current.shift();
+    }
+  }, []);
+
+  const undo = useCallback(() => {
+    if (historyRef.current.length > 0) {
+      const prev = historyRef.current.pop();
+      if (prev) {
+        try {
+          const parsed = JSON.parse(prev);
+          setPages(parsed.pages);
+          setCoverElements(parsed.coverElements);
+          trackLocalUpdate();
+        } catch (e) {
+          console.error('Falha ao restaurar histórico:', e);
+        }
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Allow native undo for text inputs and contenteditables
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable) {
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo]);
+
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -603,17 +749,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     return () => unsubscribe();
   }, [reportId, isCollaborative]);
 
-  // Auto-save logic
-  useEffect(() => {
-    if (!isCollaborative || !reportId || isRemoteUpdate.current || !hasUnsavedLocalChanges.current) return;
-
-    const timer = setTimeout(() => {
-      saveReport(true);
-    }, 5000); // Debounce save 5s
-
-    return () => clearTimeout(timer);
-  }, [pages, metadata, coverElements, isCollaborative, reportId]);
-
   useEffect(() => {
     // Listen for custom open event
     const handleOpenReport = (e: any) => {
@@ -697,6 +832,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const addElement = (pageId: string, type: ElementType, customContent?: string) => {
+    saveHistory();
     trackLocalUpdate();
     let content = 'Novo Texto';
     let width = 300;
@@ -763,6 +899,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const updateElement = (pageId: string, elId: string, updates: Partial<ReportElement>) => {
+    saveHistory();
     trackLocalUpdate();
     if (pageId === 'cover') {
       setCoverElements(prev => prev.map(el => el.id === elId ? { ...el, ...updates } : el));
@@ -814,6 +951,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const moveElementToNextPage = (pageIndex: number, elId: string) => {
+    saveHistory();
     trackLocalUpdate();
     setPages(prev => {
       const newPages = [...prev];
@@ -844,6 +982,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const deleteElement = (pageId: string, elId: string) => {
+    saveHistory();
     trackLocalUpdate();
     if (pageId === 'cover') {
       setCoverElements(prev => prev.filter(el => el.id !== elId));
@@ -860,6 +999,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const addCoverElement = (type: ElementType) => {
+    saveHistory();
     trackLocalUpdate();
     const el: ReportElement = {
       id: uuidv4(),
@@ -876,11 +1016,13 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
   };
 
   const addPage = () => {
+    saveHistory();
     trackLocalUpdate();
     setPages([...pages, { id: uuidv4(), elements: [] }]);
   };
 
   const deletePage = (id: string) => {
+    saveHistory();
     trackLocalUpdate();
     if (pages.length > 1) {
       setPages(pages.filter(p => p.id !== id));
@@ -1019,14 +1161,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
               </button>
             </div>
           )}
-          <button 
-            onClick={() => { setShowLoadModal(true); fetchRecentReports(); }}
-            className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-xs transition-colors"
-          >
-            <ArrowDownToLine className="w-3.5 h-3.5" />
-            Abrir Relatório
-          </button>
-          <div className="h-6 w-px bg-slate-700 mx-2"></div>
           <div className="text-sm font-bold text-slate-300 mr-4 tracking-tight">CAPA:</div>
           <input type="text" placeholder="Nome da Operação" value={metadata.operationName} onChange={e => handleMetadataChange('operationName', e.target.value)} className="w-36 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" />
           <input type="text" placeholder="Nº Diretiva" value={metadata.directiveNo} onChange={e => handleMetadataChange('directiveNo', e.target.value)} className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" />
@@ -1036,37 +1170,12 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
 
         <div className="flex items-center gap-2">
           <button 
-            onClick={() => setIsSignedMode(!isSignedMode)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-all sm:flex hidden ${isSignedMode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+            onClick={undo}
+            className="flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-all sm:flex hidden bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
+            title="Desfazer (Ctrl+Z)"
           >
-            {isSignedMode ? 'Modo Visualização' : 'Ativar Assinaturas'}
-          </button>
-          
-          <button 
-            onClick={() => { fetchRecipients(); setShowRecipientList(true); }}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all shadow-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-900/20`}
-            title="Enviar/Compartilhar por Email no sistema"
-          >
-            <Send className="w-4 h-4" />
-            <span className="hidden sm:inline">Compartilhar</span>
-          </button>
-          
-          <button 
-            onClick={() => saveReport()} 
-            disabled={salvando}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all shadow-lg ${salvoFeedback ? 'bg-emerald-600 text-white' : salvando ? 'bg-slate-700 text-slate-400' : 'bg-green-600 hover:bg-green-500 text-white shadow-green-900/20'}`}
-          >
-            {salvando ? <Loader2 className="w-4 h-4 animate-spin" /> : salvoFeedback ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-            {salvando ? 'Salvando...' : salvoFeedback ? 'Salvo!' : 'Salvar'}
-          </button>
-          
-          <button 
-            onClick={() => setIsCollaborative(!isCollaborative)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all shadow-lg ${isCollaborative ? 'bg-blue-600 text-white shadow-blue-900/20' : 'bg-slate-700 text-slate-300'}`}
-            title="Sincronização em tempo real"
-          >
-            <div className={`w-2 h-2 rounded-full ${isCollaborative ? 'bg-green-400 animate-pulse' : 'bg-slate-500'}`}></div>
-            {isCollaborative ? 'Sync' : 'Off'}
+            <Undo2 className="w-4 h-4" />
+            Desfazer
           </button>
           
           <button onClick={exportToJSON} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors border border-slate-600/50">
@@ -1104,14 +1213,14 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
           <div className="relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
              {/* TOOLBAR FOR COVER */}
              {!isSignedMode && (
-               <div className="absolute -left-16 top-10 flex flex-col gap-2">
+               <div className="absolute -left-16 top-1/2 -translate-y-1/2 flex flex-col gap-2">
                  <button onClick={() => addCoverElement('stamp')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow" title="Adicionar Carimbo">
                    <span className="text-xs font-bold font-serif px-1 border-2 border-slate-300 rounded-sm italic">C</span>
                  </button>
                </div>
              )}
 
-             <div ref={coverRef} className="relative w-[880px] h-[1200px] flex items-center justify-center overflow-hidden shadow-2xl" style={{ backgroundColor: '#c29b6c' }}>
+             <div ref={coverRef} id="page-cover" className="document-page relative w-[880px] h-[1200px] flex items-center justify-center overflow-hidden shadow-2xl" style={{ backgroundColor: '#c29b6c' }}>
                 {/* Texture/Noise overlay for cardboard effect */}
                 <div className="absolute inset-0 opacity-20 mix-blend-multiply pointer-events-none" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`}}></div>
                 
@@ -1151,7 +1260,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                     <input type="date" value={metadata.issueDate} onChange={e => handleMetadataChange('issueDate', e.target.value)} className="bg-transparent border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 outline-none w-48" />
                   </div>
                   <div className="flex items-end gap-4">
-                    <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Agent:</span>
+                    <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Relator:</span>
                     <div className="flex-1 border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 px-2">{metadata.agentName || '---'}</div>
                   </div>
                 </div>
@@ -1165,6 +1274,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                       onChange={(changes) => updateElement('cover', el.id, changes)}
                       onDelete={() => deleteElement('cover', el.id)}
                       readOnly={isSignedMode}
+                      boundsSelector="#page-cover"
                     />
                   </React.Fragment>
                 ))}
@@ -1177,7 +1287,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
               <div key={page.id} className="page-export-container relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
                 {/* TOOLBAR FOR THIS PAGE */}
                 {!isSignedMode && (
-                  <div className="absolute -left-16 top-10 flex flex-col gap-2">
+                  <div className="absolute -left-16 top-1/2 -translate-y-1/2 flex flex-col gap-2">
                      <button onClick={() => addElement(page.id, 'text')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow relative group" title="Adicionar Bloco de Texto">
                        <Type className="w-5 h-5"/>
                      </button>
@@ -1213,6 +1323,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
 
                 {/* PAPER */}
                 <div 
+                  id={`page-${page.id}`}
                   className="document-page relative w-[794px] h-[1123px] bg-white shadow-xl flex flex-col z-10 overflow-hidden"
                 >
                   {/* Guia de Margem Esquerda */}
@@ -1251,6 +1362,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                           onDelete={() => deleteElement(page.id, el.id)}
                           onMoveToNextPage={() => moveElementToNextPage(index, el.id)}
                           readOnly={isSignedMode}
+                          boundsSelector={`#page-${page.id}`}
                         />
                       </React.Fragment>
                     ))}
@@ -1310,148 +1422,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
           </div>
         )}
       </div>
-
-      {/* Load by Code Modal */}
-      {showLoadModal && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl"
-          >
-            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-800/50">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-400" />
-                Carregar Relatório
-              </h3>
-              <button 
-                onClick={() => setShowLoadModal(false)}
-                className="p-1 text-slate-400 hover:text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-400">Inserir ID ou Código do Relatório:</label>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={loadIdInput}
-                    onChange={(e) => setLoadIdInput(e.target.value)}
-                    placeholder="Ex: d7a1b... ou ID completo"
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white focus:border-blue-500 outline-none transition-colors"
-                  />
-                  <button 
-                    onClick={() => { if (loadIdInput) { loadReport(loadIdInput); setShowLoadModal(false); } }}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition-colors"
-                  >
-                    Carregar
-                  </button>
-                </div>
-              </div>
-
-              {recentReports.length > 0 && (
-                <div className="space-y-3">
-                  <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Recentes</h4>
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-2 pr-1">
-                    {recentReports.map(report => (
-                      <button 
-                        key={report.id}
-                        onClick={() => { loadReport(report.id); setShowLoadModal(false); }}
-                        className="w-full flex items-center justify-between p-3 bg-slate-800/40 hover:bg-slate-800 rounded-lg border border-slate-800 hover:border-slate-700 transition-all text-left group"
-                      >
-                        <div className="flex flex-col gap-0.5">
-                          <span className="font-medium text-slate-200 group-hover:text-blue-400 transition-colors line-clamp-1">{report.title}</span>
-                          <span className="text-[10px] text-slate-500 font-mono">{report.id.substring(0, 8)}...</span>
-                        </div>
-                        <div className="flex flex-col items-end gap-1 text-[10px] text-slate-500">
-                          <span>{report.updatedAt ? new Date(report.updatedAt.seconds * 1000).toLocaleDateString() : '---'}</span>
-                          <ArrowDownToLine className="w-3 h-3 group-hover:text-blue-400 transition-colors" />
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Compartilhar Modal */}
-      {showRecipientList && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-lg bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]"
-          >
-            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Send className="w-5 h-5 text-indigo-400" />
-                Compartilhar Relatório
-              </h2>
-              <button 
-                onClick={() => setShowRecipientList(false)}
-                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-                disabled={isSending}
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="p-4 bg-slate-900 border-b border-slate-800">
-              <p className="text-sm text-slate-400 mb-2">
-                Selecione um usuário para encaminhar por e-mail e dar permissão de edição a este relatório. O relatório será salvo automaticamente.
-              </p>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-              {loadingRecipients ? (
-                <div className="flex flex-col items-center justify-center py-12 gap-3">
-                  <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-                  <p className="text-sm text-slate-400">Buscando usuários...</p>
-                </div>
-              ) : recipients.length === 0 ? (
-                <div className="text-center text-slate-500 py-8">
-                  Nenhum destinatário encontrado.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {recipients.map(item => (
-                    <button 
-                      key={item.uid}
-                      disabled={isSending}
-                      onClick={() => handleSendOrForward(item)}
-                      className="w-full bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex items-center gap-3 hover:border-indigo-500/50 hover:bg-slate-800 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group"
-                    >
-                      <div className="w-10 h-10 rounded-full bg-indigo-600/20 flex items-center justify-center text-indigo-400 font-bold group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                        {item.displayName?.[0].toUpperCase() || 'U'}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-medium text-slate-200 group-hover:text-white flex items-center gap-2">
-                          {item.displayName}
-                          <span className="px-2 py-0.5 rounded text-[10px] bg-slate-700 text-slate-300 font-mono uppercase line-clamp-1">
-                            {item.role || 'Usuário'}
-                          </span>
-                        </div>
-                        <div className="text-xs text-slate-400 truncate">{item.email}</div>
-                      </div>
-                      {isSending ? (
-                        <Loader2 className="w-4 h-4 text-slate-500 animate-spin" />
-                      ) : (
-                        <Send className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-colors" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </motion.div>
-        </div>
-      )}
 
     </motion.div>
   </Rnd>
