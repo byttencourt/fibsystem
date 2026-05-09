@@ -1181,7 +1181,7 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
   allBlocks.push({
     id: 'declaracao',
     height: 160,
-    forceNewPage: false, // Junta-se à 3ª folha (Doc P2)
+    forceNewPage: true, // Nova página (Página 3)
     render: () => (
       <section key="declaracao" className="mb-10">
         <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">5. DECLARAÇÃO DO REQUERENTE</h3>
