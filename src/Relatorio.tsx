@@ -30,6 +30,7 @@ export interface ReportElement {
   fontWeight?: string;
   fontStyle?: string;
   imageStyle?: 'normal' | 'polaroid';
+  imageLegend?: string;
   angle?: number;
   points?: {x: number, y: number}[];
 }
@@ -361,10 +362,21 @@ function DraggableElement({
               {/* Fita adesiva */}
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-16 h-6 bg-yellow-100/60 shadow-[0_1px_2px_rgba(0,0,0,0.1)] transform -rotate-3 z-10"></div>
               
-              <div className="flex-1 w-full relative overflow-hidden bg-black">
+              <div className="flex-1 w-full relative overflow-hidden bg-black flex items-center justify-center">
                  <img src={el.content} className="absolute inset-0 w-full h-full object-cover grayscale-[20%] contrast-125" alt="" />
               </div>
-              <div className="absolute bottom-3 left-0 w-full text-center font-mono text-sm text-black/60 font-bold uppercase tracking-widest">EVIDENCE</div>
+              
+              <div className="absolute bottom-2 left-0 w-full px-3 flex justify-center items-center pointer-events-auto">
+                <input 
+                  type="text" 
+                  value={el.imageLegend ?? 'EVIDENCE'} 
+                  onChange={(e) => onChange({ imageLegend: e.target.value })} 
+                  onFocus={() => setIsEditing(true)}
+                  onBlur={() => setIsEditing(false)}
+                  className="w-full text-center font-mono text-sm text-black/60 font-bold uppercase tracking-widest bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500/50 focus:bg-black/5 hover:bg-black/5 transition-colors rounded"
+                  readOnly={readOnly}
+                />
+              </div>
             </div>
           ) : (
             <img src={el.content} className="w-full h-full object-cover pointer-events-none shadow" alt="" />
