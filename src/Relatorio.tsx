@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { 
   ChevronLeft, Download, Image as ImageIcon, Type, Save, Square,
   Trash2, Check, Copy, FileText, Maximize2, Minimize2, X, PlusCircle, Trash,
-  Circle, Minus, ArrowDownToLine, MoveUpRight, PenTool, Highlighter, Loader2, Move, Send, Undo2
+  Circle, Minus, ArrowDownToLine, MoveUpRight, PenTool, Highlighter, Loader2, Move, Send, Undo2, FilePlus
 } from 'lucide-react';
 import { toBlob } from 'html-to-image';
 import { Rnd } from 'react-rnd';
@@ -941,38 +941,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
         
         let newElements = p.elements.map(el => el.id === elId ? { ...el, ...updates } : el);
         
-        // Auto-push layout logic: If height grows or Y moves, check for overlaps and push elements down
-        const isPushAction = (updates.height !== undefined && updates.height > oldEl.height) || 
-                            (updates.y !== undefined && updates.y !== oldEl.y);
-
-        if (isPushAction && oldEl.type === 'text') {
-           // Basic constraint logic to avoid overwriting
-           let changed = true;
-           let iter = 0;
-           while (changed && iter < 10) {
-             changed = false;
-             iter++;
-             for (let i = 0; i < newElements.length; i++) {
-               for (let j = 0; j < newElements.length; j++) {
-                 if (i === j) continue;
-                 const top = newElements[i];
-                 const bottom = newElements[j];
-
-                 // Only text elements push other text elements. 
-                 // Overlays (images, stamps, etc) should allow overlap.
-                 if (top.type !== 'text' || bottom.type !== 'text') continue;
-                 
-                 // If 'top' overlaps 'bottom' vertically, push 'bottom' further down
-                 // We only push if top is actually above or at the same level as bottom
-                 if (top.y <= bottom.y && (top.y + top.height + 15) > bottom.y) {
-                    bottom.y = top.y + top.height + 15;
-                    changed = true;
-                 }
-               }
-             }
-           }
-        }
-        
         return { ...p, elements: newElements };
       }
       return p;
@@ -1050,6 +1018,14 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     setPages([...pages, { id: uuidv4(), elements: [] }]);
   };
 
+  const insertPageAfter = (index: number) => {
+    saveHistory();
+    trackLocalUpdate();
+    const newPages = [...pages];
+    newPages.splice(index + 1, 0, { id: uuidv4(), elements: [] });
+    setPages(newPages);
+  };
+
   const deletePage = (id: string) => {
     saveHistory();
     trackLocalUpdate();
@@ -1100,6 +1076,22 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  const downloadSinglePageAsImage = async (elementId: string | null, refElement: HTMLElement | null, filename: string, bgColor: string) => {
+    const el = elementId ? document.getElementById(elementId) : refElement;
+    if (!el) return;
+    setIsExporting(true);
+    setSelectedElement(null);
+    await new Promise(r => setTimeout(r, 100));
+    try {
+      await exportSingleImage(el, filename, bgColor);
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao exportar página.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const exportDocument = async () => {
@@ -1242,9 +1234,13 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
           <div className="relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
              {/* TOOLBAR FOR COVER */}
              {!isSignedMode && (
-               <div className="absolute -left-16 top-1/2 -translate-y-1/2 flex flex-col gap-2">
+               <div className="absolute -left-16 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-50">
                  <button onClick={() => addCoverElement('stamp')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow" title="Adicionar Carimbo">
                    <span className="text-xs font-bold font-serif px-1 border-2 border-slate-300 rounded-sm italic">C</span>
+                 </button>
+                 <div className="w-full h-px bg-slate-700 my-1"></div>
+                 <button onClick={() => downloadSinglePageAsImage(null, coverRef.current, `1_Capa_${metadata.directiveNo || 'Relatorio'}.png`, '#c29b6c')} className="p-2 bg-indigo-900/50 text-indigo-300 rounded hover:bg-indigo-800 hover:text-white shadow mt-2" title="Baixar Apenas Esta Página">
+                   <Download className="w-5 h-5"/>
                  </button>
                </div>
              )}
@@ -1313,10 +1309,10 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
 
           <div ref={docRef} className="flex flex-col gap-16 items-center w-full">
             {pages.map((page, index) => (
-              <div key={page.id} className="page-export-container relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
+              <div key={page.id} id={`export-container-${page.id}`} className="page-export-container relative w-[880px] h-[1200px] flex items-center justify-center shrink-0">
                 {/* TOOLBAR FOR THIS PAGE */}
                 {!isSignedMode && (
-                  <div className="absolute -left-16 top-1/2 -translate-y-1/2 flex flex-col gap-2">
+                  <div className="absolute -left-16 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-50">
                      <button onClick={() => addElement(page.id, 'text')} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow relative group" title="Adicionar Bloco de Texto">
                        <Type className="w-5 h-5"/>
                      </button>
@@ -1340,7 +1336,14 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                      <button onClick={() => addElement(page.id, 'stamp')} className="p-2 w-full flex justify-center bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white shadow" title="Adicionar Carimbo">
                        <span className="text-xs font-bold font-serif px-1 border-2 border-slate-300 rounded-sm italic">C</span>
                      </button>
-                     <button onClick={() => deletePage(page.id)} className="p-2 bg-red-900/50 text-red-300 rounded hover:bg-red-800 hover:text-white shadow mt-4" title="Excluir Página">
+                     <div className="w-full h-px bg-slate-700 my-1"></div>
+                     <button onClick={() => downloadSinglePageAsImage(`export-container-${page.id}`, null, `${index + 2}_Pagina_${index + 1}_${metadata.directiveNo || 'Relatorio'}.png`, '#d4b082')} className="p-2 bg-indigo-900/50 text-indigo-300 rounded hover:bg-indigo-800 hover:text-white shadow mt-2" title="Baixar Apenas Esta Página">
+                       <Download className="w-5 h-5"/>
+                     </button>
+                     <button onClick={() => insertPageAfter(index)} className="p-2 bg-indigo-900/50 text-indigo-300 rounded hover:bg-indigo-800 hover:text-white shadow mt-2" title="Inserir Nova Página Abaixo">
+                       <FilePlus className="w-5 h-5"/>
+                     </button>
+                     <button onClick={() => deletePage(page.id)} className="p-2 bg-red-900/50 text-red-300 rounded hover:bg-red-800 hover:text-white shadow mt-2" title="Excluir Página">
                        <Trash className="w-5 h-5"/>
                      </button>
                   </div>
