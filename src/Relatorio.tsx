@@ -98,7 +98,7 @@ function DraggableElement({
   el: ReportElement;
   selected: boolean;
   onSelect: () => void;
-  onChange: (updates: Partial<ReportElement>) => void;
+  onChange: (updates: Partial<ReportElement>, preventHistory?: boolean) => void;
   onDelete: () => void;
   onMoveToNextPage?: () => void;
   readOnly: boolean;
@@ -351,7 +351,7 @@ function DraggableElement({
                  // Update height only
                  onChange({ 
                    height: e.currentTarget.scrollHeight
-                 });
+                 }, true);
               }
             }}
           />
@@ -474,7 +474,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     const current = JSON.stringify(stateRef.current);
     if (historyRef.current.length === 0 || historyRef.current[historyRef.current.length - 1] !== current) {
       historyRef.current.push(current);
-      if (historyRef.current.length > 50) historyRef.current.shift();
+      if (historyRef.current.length > 5) historyRef.current.shift();
     }
   }, []);
 
@@ -889,8 +889,37 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) {
         const reader = new FileReader();
-        reader.onloadend = () => {
-          if (reader.result) addElement(pageId, 'image', reader.result as string);
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 1000;
+            const MAX_HEIGHT = 1000;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+              if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+              }
+            } else {
+              if (height > MAX_HEIGHT) {
+                width *= MAX_HEIGHT / height;
+                height = MAX_HEIGHT;
+              }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, width, height);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.6); // Compress to limit memory
+              addElement(pageId, 'image', dataUrl);
+            }
+          };
+          img.src = e.target?.result as string;
         };
         reader.readAsDataURL(file);
       }
@@ -898,8 +927,8 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     input.click();
   };
 
-  const updateElement = (pageId: string, elId: string, updates: Partial<ReportElement>) => {
-    saveHistory();
+  const updateElement = (pageId: string, elId: string, updates: Partial<ReportElement>, preventHistory: boolean = false) => {
+    if (!preventHistory) saveHistory();
     trackLocalUpdate();
     if (pageId === 'cover') {
       setCoverElements(prev => prev.map(el => el.id === elId ? { ...el, ...updates } : el));
@@ -1222,7 +1251,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
 
              <div ref={coverRef} id="page-cover" className="document-page relative w-[880px] h-[1200px] flex items-center justify-center overflow-hidden shadow-2xl" style={{ backgroundColor: '#c29b6c' }}>
                 {/* Texture/Noise overlay for cardboard effect */}
-                <div className="absolute inset-0 opacity-20 mix-blend-multiply pointer-events-none" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`}}></div>
+                <div className="absolute inset-0 opacity-[0.15] mix-blend-multiply pointer-events-none" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='1' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`}}></div>
                 
                 <div className="relative z-10 flex flex-col items-center w-full px-24">
                    {sealBase64 ? (
@@ -1271,7 +1300,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                       el={el}
                       selected={selectedElement === el.id}
                       onSelect={() => setSelectedElement(el.id)}
-                      onChange={(changes) => updateElement('cover', el.id, changes)}
+                      onChange={(changes, preventHistory) => updateElement('cover', el.id, changes, preventHistory)}
                       onDelete={() => deleteElement('cover', el.id)}
                       readOnly={isSignedMode}
                       boundsSelector="#page-cover"
@@ -1318,7 +1347,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                 )}
 
                 <div className="absolute inset-0 shadow-2xl" style={{ backgroundColor: '#d4b082' }}>
-                  <div className="absolute inset-0 opacity-20 mix-blend-multiply pointer-events-none" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`}}></div>
+                  <div className="absolute inset-0 opacity-[0.15] mix-blend-multiply pointer-events-none" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='1' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`}}></div>
                 </div>
 
                 {/* PAPER */}
@@ -1358,7 +1387,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                           el={el} 
                           selected={selectedElement === el.id}
                           onSelect={() => setSelectedElement(el.id)}
-                          onChange={(updates) => updateElement(page.id, el.id, updates)}
+                          onChange={(updates, preventHistory) => updateElement(page.id, el.id, updates, preventHistory)}
                           onDelete={() => deleteElement(page.id, el.id)}
                           onMoveToNextPage={() => moveElementToNextPage(index, el.id)}
                           readOnly={isSignedMode}
