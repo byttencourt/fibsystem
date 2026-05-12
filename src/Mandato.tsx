@@ -1070,7 +1070,7 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
           </div>
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-widest text-black/90 text-center border-y border-black/10 py-2 mb-4">SOLICITAÇÃO DE MANDADO JUDICIAL</h1>
+          <h1 className="text-2xl font-bold tracking-widest text-black/90 text-center border-y border-black/10 py-2 mb-4">MANDADO JUDICIAL</h1>
           <p className="font-bold border-l-4 border-black pl-3 py-1 bg-black/5">Directive No.: <span className="font-normal">{formData.directiveNo || '[NÃO INFORMADO]'}</span></p>
         </div>
       </div>
