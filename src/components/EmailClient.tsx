@@ -185,7 +185,11 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
     try {
       const { supabase } = await import('../lib/supabase');
       if (!supabase) {
-        throw new Error("Supabase não configurado. Por favor, adicione as chaves VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no menu de configurações (Settings) do AI Studio para usar armazenamento longo.");
+        const missing = [];
+        if (!import.meta.env.VITE_SUPABASE_URL) missing.push("VITE_SUPABASE_URL");
+        if (!import.meta.env.VITE_SUPABASE_ANON_KEY) missing.push("VITE_SUPABASE_ANON_KEY");
+        
+        throw new Error(`Configuração do Supabase incompleta. Faltando: ${missing.join(', ')}. Por favor, verifique seu arquivo .env ou as configurações de segredo (Secrets) no painel de controle.`);
       }
 
       const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
