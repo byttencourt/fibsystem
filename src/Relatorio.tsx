@@ -717,6 +717,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
         subject: `Relatório Compartilhado: ${metadata.operationName || 'Relatório de Investigação'}`,
         body: `Olá, ${recipient.displayName || 'Colega'}.\n\nUm relatório foi compartilhado com você por ${profile.displayName}.\n\nPara visualizar e colaborar, clique no anexo abaixo para abri-lo diretamente no sistema e ligue a chave COLABORATIVO, ou acesse o link direto:\n${reportUrl}`,
         attachmentId: finalId,
+        attachmentTitle: metadata.operationName || metadata.directiveNo || 'Relatório Compartilhado',
         attachmentType: 'report',
         read: false,
         timestamp: serverTimestamp()
@@ -787,11 +788,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
           })
           .then(obj => {
              if (obj.error) throw new Error(obj.error);
-             
-             // DEBUG LOGIC
-             if ((!obj.pages || obj.pages.length === 0) && !obj.objetivo && !obj.historico && !obj.conclusao) {
-                alert("DEBUG INFO - falhou nas páginas: " + JSON.stringify(obj).substring(0, 500));
-             }
 
              if (obj.metadata) setMetadata(obj.metadata);
              
@@ -844,10 +840,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const obj = await res.json();
             if (obj.error) throw new Error(obj.error);
-
-            if ((!obj.pages || obj.pages.length === 0) && !obj.objetivo && !obj.historico && !obj.conclusao) {
-              alert("DEBUG INFO - pendente falhou nas paginas: " + JSON.stringify(obj).substring(0, 500));
-            }
 
             if (obj.metadata) setMetadata(obj.metadata);
              

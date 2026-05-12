@@ -326,6 +326,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
               subject: `Mandado Retornado: ${formData.nomeOperacao || formData.directiveNo}`,
               body: `Olá, ${ownerData.displayName}.\n\nO magistrado ${profile.displayName} revisou sua solicitação de mandado.\n\nStatus: ${formData.statusMandado}\nOperação: ${formData.nomeOperacao || 'N/A'}\nDirective No: ${formData.directiveNo || 'N/A'}\n\nO documento assinado está disponível em anexo.`,
               attachmentId: activeMandateId,
+              attachmentTitle: formData.nomeOperacao || formData.directiveNo || 'Mandado Devolvido',
               attachmentType: 'mandate',
               read: false,
               timestamp: serverTimestamp()
@@ -474,6 +475,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
           subject: `${isFromMagistrate ? 'Mandado Encaminhado' : 'Novo Mandado para Revisão'}: ${formData.nomeOperacao || formData.directiveNo}`,
           body: `Olá, ${recipient.displayName}.\n\nUm mandado foi encaminhado para você por ${profile.displayName}.\n\nOperação: ${formData.nomeOperacao || 'N/A'}\nStatus: ${formData.statusMandado || 'N/A'}\n\nLink Direto: ${mandateUrl}\n\nVocê pode revisar o documento diretamente pelo sistema de e-mails clicando no anexo abaixo.`,
           attachmentId: mandateId,
+          attachmentTitle: formData.nomeOperacao || formData.directiveNo || 'Mandado Judicial',
           attachmentType: 'mandate',
           read: false,
           timestamp: serverTimestamp()
@@ -530,7 +532,8 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
   };
 
   const isPromotor = profile?.role?.toLowerCase().includes('promotor');
-  const canEditFields = !isSignedMode;
+  const isMagistrate = isMagistrateRole(profile?.role);
+  const canEditFields = !isSignedMode || isMagistrate;
 
   return (
     <Rnd
@@ -619,7 +622,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                       </button>
                     </>
                   )}
-                  {isJuizMode && !isSignedMode && (
+                  {isJuizMode && (canEditFields) && (
                     <>
                       {activeMandateId && (
                         <button 
@@ -655,8 +658,8 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                           name="statusMandado" 
                           value={formData.statusMandado || 'Pendente'} 
                           onChange={handleChange} 
-                          disabled={isSignedMode}
-                          className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all ${isSignedMode ? 'opacity-70 cursor-not-allowed' : ''}`}
+                          disabled={!canEditFields}
+                          className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all ${!canEditFields ? 'opacity-70 cursor-not-allowed' : ''}`}
                         >
                           <option value="Pendente">Pendente</option>
                           <option value="Aprovado">Aprovado</option>
@@ -672,8 +675,8 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                           value={formData.juizAssinatura} 
                           onChange={handleChange} 
                           placeholder="Ex: Juiz Federal Harvey Specter" 
-                          readOnly={isSignedMode}
-                          className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-signature text-2xl ${isSignedMode ? 'opacity-70 cursor-not-allowed' : ''}`} 
+                          readOnly={!canEditFields}
+                          className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-signature text-2xl ${!canEditFields ? 'opacity-70 cursor-not-allowed' : ''}`} 
                         />
                       </div>
                     </div>
@@ -686,15 +689,15 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                         onChange={handleChange} 
                         rows={4} 
                         placeholder="Adicione informações, restrições ou justificativas para a decisão..." 
-                        readOnly={isSignedMode}
-                        className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all resize-y ${isSignedMode ? 'opacity-70 cursor-not-allowed' : ''}`} 
+                        readOnly={!canEditFields}
+                        className={`w-full bg-slate-950 border border-amber-700/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all resize-y ${!canEditFields ? 'opacity-70 cursor-not-allowed' : ''}`} 
                       />
                     </div>
                   </div>
                 )}
 
                 {/* Section 1 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-80 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${!canEditFields ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">1. Requerente</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
@@ -713,7 +716,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                 </div>
 
                 {/* Section 2 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-80 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${!canEditFields ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">2. Informações do Mandado</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div>
@@ -753,7 +756,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                 </div>
 
                 {/* Section 3 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-80 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${!canEditFields ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">3. Base Legal e Causa Provável</h3>
                   <div className="space-y-4">
                     <div>
@@ -768,7 +771,7 @@ export function MandatoWindow({ isMaximized, onClose, onMinimize, onMaximize, on
                 </div>
 
                 {/* Section 4 */}
-                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${isSignedMode ? 'opacity-80 pointer-events-none' : ''}`}>
+                <div className={`bg-slate-800/50 p-5 rounded-lg border border-slate-700/50 ${!canEditFields ? 'opacity-80 pointer-events-none' : ''}`}>
                   <h3 className="text-sm font-bold text-blue-400 mb-4 uppercase tracking-wider border-b border-slate-700 pb-2">4. Solicitação Específica</h3>
                   <div className="space-y-4">
                     <div>

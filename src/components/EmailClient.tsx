@@ -183,15 +183,33 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
     setSending(true);
     setShowAttachments(false);
     try {
-      const response = await fetch('/api/upload-anexo', {
-        method: 'POST',
-        body: await file.arrayBuffer(),
-        headers: { 'x-file-name': file.name }
+      const { supabase } = await import('../lib/supabase');
+      if (!supabase) {
+        throw new Error("Supabase não configurado. Por favor, adicione as chaves VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no menu de configurações (Settings) do AI Studio para usar armazenamento longo.");
+      }
+
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const filePath = `${user?.uid || 'anon'}/${Date.now()}_${sanitizedName}`;
+      
+      const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type || 'application/octet-stream'
       });
+      
+      if (uploadError) {
+        console.error("Supabase Upload Error:", uploadError);
+        if (uploadError.message.includes('400')) {
+          throw new Error("O Supabase recusou o arquivo (Erro 400). Verifique no painel do Supabase se o bucket 'attachments' permite esta extensão de arquivo (MIME type). " + uploadError.message);
+        }
+        throw new Error("Erro no Supabase: " + uploadError.message);
+      }
+      
+      const { data } = supabase.storage.from('attachments').getPublicUrl(filePath);
+      
+      if (!data?.publicUrl) throw new Error("Erro ao obter URL pública do Supabase");
 
-      if (!response.ok) throw new Error("Erro ao processar upload no servidor.");
-
-      const rawUrl = await response.text();
+      const rawUrl = data.publicUrl;
       const proxiedUrl = `/api/proxy-storage?url=${encodeURIComponent(rawUrl.trim())}`;
       
       setAttachment({ title: file.name, type: 'external', url: proxiedUrl });
@@ -374,14 +392,14 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                     {selectedEmail.body}
                   </div>
 
-                  {selectedEmail.attachmentTitle && (
+                  {(selectedEmail.attachmentTitle || selectedEmail.attachmentType) && (
                     <div className="mt-8 p-4 bg-blue-600/5 rounded-xl border border-blue-500/10 flex items-center justify-between group">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-blue-600/20 flex items-center justify-center">
                           <FileText className="w-5 h-5 text-blue-400" />
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-white uppercase tracking-tight">{selectedEmail.attachmentTitle}</p>
+                          <p className="text-sm font-bold text-white uppercase tracking-tight">{selectedEmail.attachmentTitle || 'Documento Anexado'}</p>
                           <p className="text-[10px] text-blue-400/60 uppercase font-bold tracking-widest">{selectedEmail.attachmentType}</p>
                         </div>
                       </div>
@@ -494,7 +512,7 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                                 )}>
                                   {email.subject}
                                 </p>
-                                {email.attachmentTitle && (
+                                {(email.attachmentTitle || email.attachmentType) && (
                                   <Paperclip className="w-3 h-3 text-slate-600" />
                                 )}
                               </div>
