@@ -120,6 +120,14 @@ service cloud.firestore {
       )) || (!isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['data', 'status', 'updatedAt', 'juizAssinatura', 'parecerJuiz', 'statusMandado']));
 
       allow delete: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid) || (!isSignedIn() && resource.data.ownerId != "");
+    }
+
+    // --- File Uploads (Chunks) ---
+    match /file_uploads/{fileId} {
+      allow read, write: if true; 
+      match /chunks/{chunkId} {
+        allow read, write: if true;
+      }
+    }
   }
-}
 }

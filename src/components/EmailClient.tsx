@@ -28,8 +28,10 @@ interface Email {
   toEmail: string;
   subject: string;
   body: string;
-  attachmentId?: string;
-  attachmentType?: 'report' | 'mandate';
+  attachmentId?: string | null;
+  attachmentType?: 'report' | 'mandate' | 'external' | null;
+  attachmentUrl?: string | null;
+  attachmentTitle?: string | null;
   read: boolean;
   timestamp: any;
 }
@@ -50,20 +52,21 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // Compose state
   const [toEmail, setToEmail] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
-  const [attachment, setAttachment] = useState<{id: string, title: string, type: 'report' | 'mandate'} | null>(null);
+  const [attachment, setAttachment] = useState<{id?: string, title: string, type: 'report' | 'mandate' | 'external', url?: string} | null>(null);
   const [sending, setSending] = useState(false);
-  const [availableReports, setAvailableReports] = useState<{id: string, title: string}[]>([]);
+  const [availableReports, setAvailableReports] = useState<{id: string, title: string, type: 'report' | 'mandate'}[]>([]);
   const [showAttachments, setShowAttachments] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   const [allUsers, setAllUsers] = useState<string[]>([]);
 
   useEffect(() => {
     if (view === 'compose' && allUsers.length === 0) {
-      getDocs(collection(db, 'users')).then(snap => {
-        setAllUsers(snap.docs.map(d => d.data().email as string));
+      getDocs(collection(db, 'users')).then(snapshot => {
+        const emails = snapshot.docs.map(doc => doc.data().email as string);
+        setAllUsers(emails);
       });
     }
   }, [view]);
@@ -80,6 +83,7 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
       setEmails(emailList);
       setLoading(false);
     }, (error) => {
+      console.error("Error fetching emails:", error);
       setLoading(false);
       handleFirestoreError(error, OperationType.LIST, 'emails');
     });
@@ -90,16 +94,15 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !profile) return;
-    setSending(true);
 
+    setSending(true);
     try {
-      // Find recipient UID by email
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('email', '==', toEmail));
       const querySnapshot = await getDocs(q);
       
       if (querySnapshot.empty) {
-        throw new Error('Destinatário não encontrado.');
+        throw new Error('Destinatário não encontrado no sistema.');
       }
 
       const recipientId = querySnapshot.docs[0].id;
@@ -113,14 +116,15 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
         body,
         attachmentId: attachment?.id || null,
         attachmentType: attachment?.type || null,
+        attachmentUrl: attachment?.url || null,
+        attachmentTitle: attachment?.title || null,
         read: false,
         timestamp: serverTimestamp()
       };
 
       await addDoc(collection(db, 'emails'), emailData);
 
-      // If there's an attachment, add the recipient to sharedWith
-      if (attachment) {
+      if (attachment && attachment.type !== 'external' && attachment.id) {
         const collectionName = attachment.type === 'mandate' ? 'mandates' : 'reports';
         const docRef = doc(db, collectionName, attachment.id);
         await updateDoc(docRef, {
@@ -135,6 +139,7 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
       setAttachment(null);
       alert('E-mail enviado com sucesso!');
     } catch (err: any) {
+      console.error("Error sending email:", err);
       alert(err.message);
     } finally {
       setSending(false);
@@ -143,49 +148,90 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
 
   const fetchReports = async () => {
     if (!user) return;
-    const q1 = query(collection(db, 'reports'), where('ownerId', '==', user.uid));
-    const snap1 = await getDocs(q1);
-    const reports = snap1.docs.map(d => ({ id: d.id, title: d.data().title, type: 'report' as const }));
+    try {
+      const reportsQuery = query(collection(db, 'reports'), where('ownerId', '==', user.uid));
+      const reportsSnap = await getDocs(reportsQuery);
+      const reports = reportsSnap.docs.map(doc => ({
+        id: doc.id,
+        title: doc.data().title,
+        type: 'report' as const
+      }));
 
-    const q2 = query(collection(db, 'mandates'), where('ownerId', '==', user.uid));
-    const snap2 = await getDocs(q2);
-    const mandates = snap2.docs.map(d => ({ id: d.id, title: d.data().title, type: 'mandate' as const }));
+      const mandatesQuery = query(collection(db, 'mandates'), where('ownerId', '==', user.uid));
+      const mandatesSnap = await getDocs(mandatesQuery);
+      const mandates = mandatesSnap.docs.map(doc => ({
+        id: doc.id,
+        title: doc.data().title,
+        type: 'mandate' as const
+      }));
 
-    setAvailableReports([...reports, ...mandates]);
+      setAvailableReports([...reports, ...mandates]);
+    } catch (err) {
+      console.error("Error fetching reports:", err);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 20 * 1024 * 1024) {
+      alert("Por favor, selecione um arquivo menor que 20MB");
+      return;
+    }
+
+    setSending(true);
+    setShowAttachments(false);
+    try {
+      const response = await fetch('/api/upload-anexo', {
+        method: 'POST',
+        body: await file.arrayBuffer(),
+        headers: { 'x-file-name': file.name }
+      });
+
+      if (!response.ok) throw new Error("Erro ao processar upload no servidor.");
+
+      const rawUrl = await response.text();
+      const proxiedUrl = `/api/proxy-storage?url=${encodeURIComponent(rawUrl.trim())}`;
+      
+      setAttachment({ title: file.name, type: 'external', url: proxiedUrl });
+    } catch (err: any) {
+      alert("Erro ao fazer upload do arquivo: " + err.message);
+    } finally {
+      setSending(false);
+    }
   };
 
   const markAsRead = async (email: Email) => {
     if (email.read || view === 'sent') return;
     try {
-      await updateDoc(doc(db, 'emails', email.id), { read: true });
+      const emailRef = doc(db, 'emails', email.id);
+      await updateDoc(emailRef, { read: true });
     } catch (err) {
-      console.error(err);
+      console.error("Error marking email as read:", err);
     }
   };
 
-  const handleDelete = async (emailId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  const handleDelete = async (emailId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!confirm('Deseja realmente excluir este e-mail?')) return;
-    
     try {
       await deleteDoc(doc(db, 'emails', emailId));
-      if (selectedEmail?.id === emailId) {
-        setSelectedEmail(null);
-      }
+      if (selectedEmail?.id === emailId) setSelectedEmail(null);
     } catch (err) {
-      console.error('Erro ao excluir e-mail:', err);
       alert('Erro ao excluir e-mail.');
     }
   };
 
+  const filteredEmails = emails.filter(email => 
+    email.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    email.fromEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    email.toEmail.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <Rnd
-      default={{
-        x: 80,
-        y: 80,
-        width: 900,
-        height: 600,
-      }}
+      default={{ x: 80, y: 80, width: 900, height: 600 }}
       size={isMaximized ? { width: '100vw', height: '100vh' } : undefined}
       position={isMaximized ? { x: 0, y: 0 } : undefined}
       disableDragging={isMaximized}
@@ -209,303 +255,271 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
         <div className="bg-slate-800/80 backdrop-blur-md px-4 py-2 flex items-center justify-between border-b border-white/5 cursor-default group handle-drag" onDoubleClick={onMaximize}>
           <div className="flex items-center gap-2 pointer-events-none">
             <Mail className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">Caixa de E-mail Corporativo</span>
+            <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">E-mail Corporativo</span>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onMinimize} className="p-1.5 hover:bg-white/5 rounded text-slate-400"><Minus className="w-3.5 h-3.5" /></button>
-            <button onClick={onMaximize} className="p-1.5 hover:bg-white/5 rounded text-slate-400"><Square className="w-3.5 h-3.5" /></button>
+            <button onClick={onMinimize} className="p-1.5 hover:bg-white/5 rounded text-slate-400 transition-colors"><Minus className="w-3.5 h-3.5" /></button>
+            <button onClick={onMaximize} className="p-1.5 hover:bg-white/5 rounded text-slate-400 transition-colors"><Square className="w-3.5 h-3.5" /></button>
             <button onClick={onClose} className="p-1.5 hover:bg-red-500/80 hover:text-white rounded text-slate-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
           </div>
         </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
-        <div className="w-56 bg-slate-950/50 border-r border-white/5 p-4 flex flex-col gap-2">
-          <button 
-            onClick={() => { setView('compose'); setSelectedEmail(null); }}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2 mb-4 shadow-lg shadow-blue-600/20"
-          >
-            <Send className="w-4 h-4" />
-            Novo E-mail
-          </button>
+        <div className="flex-1 flex overflow-hidden">
+          {/* Sidebar */}
+          <div className="w-56 bg-slate-950/50 border-r border-white/5 p-4 flex flex-col gap-2">
+            <button 
+              onClick={() => { setView('compose'); setSelectedEmail(null); }}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2 mb-4 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+            >
+              <Send className="w-4 h-4" />
+              Novo E-mail
+            </button>
 
-          <NavButton active={view === 'inbox'} onClick={() => { setView('inbox'); setSelectedEmail(null); }} icon={<Inbox className="w-4 h-4" />} label="Entrada" count={emails.filter(e => !e.read && e.toId === user?.uid).length} />
-          <NavButton active={view === 'sent'} onClick={() => { setView('sent'); setSelectedEmail(null); }} icon={<SendHorizontal className="w-4 h-4" />} label="Enviados" />
-          
-          <div className="mt-auto pt-4 border-t border-white/5">
-            <div className="flex items-center gap-3 px-3 py-2 text-slate-400">
-               <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold">
-                 {profile?.displayName?.slice(0, 2).toUpperCase()}
-               </div>
-               <div className="flex flex-col">
-                 <span className="text-xs font-bold text-white truncate max-w-[100px]">{profile?.displayName}</span>
-                 <span className="text-[10px] uppercase opacity-50">{profile?.role}</span>
-               </div>
-            </div>
+            <NavButton active={view === 'inbox'} onClick={() => { setView('inbox'); setSelectedEmail(null); }} icon={<Inbox className="w-4 h-4" />} label="Entrada" count={emails.filter(e => !e.read && e.toId === user?.uid).length} />
+            <NavButton active={view === 'sent'} onClick={() => { setView('sent'); setSelectedEmail(null); }} icon={<SendHorizontal className="w-4 h-4" />} label="Enviados" />
           </div>
-        </div>
 
-        {/* Content */}
-        <div className="flex-1 flex flex-col bg-slate-900/30 overflow-hidden">
-          {view === 'compose' ? (
-            <div className="flex-1 flex flex-col p-6 overflow-y-auto">
-              <div className="flex items-center gap-2 mb-6">
-                <button onClick={() => setView('inbox')} className="p-2 hover:bg-white/5 rounded-full"><ChevronLeft className="w-5 h-5 text-slate-400"/></button>
-                <h2 className="text-xl font-bold text-white">Novo Documento</h2>
-              </div>
+          <div className="flex-1 flex flex-col bg-slate-900/30 overflow-hidden">
+            <AnimatePresence mode="wait">
+              {view === 'compose' ? (
+                <motion.div key="compose" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex-1 flex flex-col p-6 overflow-y-auto custom-scrollbar">
+                  <form onSubmit={handleSend} className="space-y-4">
+                    <div className="space-y-1">
+                      <input type="email" required value={toEmail} onChange={(e) => setToEmail(e.target.value)} list="user-emails" className="bg-transparent border-b border-white/5 pb-2 text-sm text-white w-full outline-none focus:border-blue-500 transition-colors" placeholder="Para:" />
+                      <datalist id="user-emails">{allUsers.map(email => <option key={email} value={email} />)}</datalist>
+                    </div>
+                    <input type="text" required value={subject} onChange={(e) => setSubject(e.target.value)} className="bg-transparent border-b border-white/5 pb-2 text-sm text-white w-full outline-none focus:border-blue-500 transition-colors" placeholder="Assunto:" />
+                    
+                    <div className="relative">
+                      <button type="button" onClick={() => { setShowAttachments(!showAttachments); fetchReports(); }} className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 rounded border border-white/5 transition-colors">
+                        <Paperclip className="w-3.5 h-3.5" /> {attachment ? attachment.title : 'Anexar Documento ou Arquivo'}
+                      </button>
 
-              <form onSubmit={handleSend} className="space-y-4">
-                <div className="grid grid-cols-[100px_1fr] items-center border-b border-white/5 pb-2 relative">
-                  <span className="text-xs font-bold text-slate-500 uppercase">Para:</span>
-                  <input 
-                    type="email" 
-                    required 
-                    value={toEmail}
-                    onChange={(e) => setToEmail(e.target.value)}
-                    className="bg-transparent text-sm text-white focus:outline-none w-full" 
-                    placeholder="nome@email.gov"
-                    list="registered-emails"
-                  />
-                  <datalist id="registered-emails">
-                    {allUsers.map(email => (
-                      <option key={email} value={email} />
-                    ))}
-                  </datalist>
-                </div>
-                <div className="grid grid-cols-[100px_1fr] items-center border-b border-white/5 pb-2">
-                  <span className="text-xs font-bold text-slate-500 uppercase">Assunto:</span>
-                  <input 
-                    type="text" 
-                    required 
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
-                    className="bg-transparent text-sm text-white focus:outline-none w-full" 
-                    placeholder="e.g. Relatório de Investigação #451"
-                  />
-                </div>
+                      <AnimatePresence>
+                        {showAttachments && (
+                          <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }} className="absolute top-full left-0 mt-2 w-72 bg-slate-950 border border-white/10 rounded-lg shadow-2xl p-2 z-50">
+                            <label className="flex items-center gap-2 p-2 hover:bg-white/5 rounded cursor-pointer text-xs text-blue-400 mb-2 border-b border-white/5 pb-2">
+                              <FileText className="w-4 h-4" /> Enviar Arquivo Local
+                              <input type="file" className="hidden" onChange={handleFileUpload} />
+                            </label>
+                            <div className="max-h-48 overflow-y-auto custom-scrollbar">
+                              {availableReports.map(report => (
+                                <button key={report.id} type="button" onClick={() => { setAttachment({ id: report.id, title: report.title, type: report.type }); setShowAttachments(false); }} className="w-full text-left p-2 hover:bg-white/5 rounded text-xs text-slate-400 transition-colors flex items-center gap-2">
+                                  <div className={cn("w-1.5 h-1.5 rounded-full", report.type === 'mandate' ? "bg-purple-500" : "bg-blue-500")} />
+                                  <span className="truncate italic">{report.title}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
 
-                <div className="flex items-center gap-2 py-2">
-                  <button 
-                    type="button"
-                    onClick={() => { setShowAttachments(!showAttachments); fetchReports(); }}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs transition-colors border border-white/5"
-                  >
-                    <Paperclip className="w-3.5 h-3.5" />
-                    {attachment ? attachment.title : 'Anexar Documento'}
+                    <textarea required value={body} onChange={(e) => setBody(e.target.value)} className="w-full flex-1 min-h-[300px] bg-transparent text-sm text-slate-300 resize-none outline-none custom-scrollbar" placeholder="Escreva sua mensagem aqui..." />
+                    
+                    <div className="pt-4 border-t border-white/5 flex justify-end">
+                      <button type="submit" disabled={sending} className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-sm font-bold flex items-center gap-2 transition-all">
+                        {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        Enviar Mensagem
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              ) : selectedEmail ? (
+                <motion.div key="read" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex-1 flex flex-col p-6 overflow-y-auto custom-scrollbar">
+                  <button onClick={() => setSelectedEmail(null)} className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 mb-6 transition-colors">
+                    <ChevronLeft className="w-4 h-4" /> Voltar para a lista
                   </button>
-                  {attachment && (
-                    <button type="button" onClick={() => setAttachment(null)} className="text-red-400 hover:text-red-300"><X className="w-4 h-4"/></button>
-                  )}
-                </div>
-
-                {showAttachments && (
-                  <div className="bg-slate-950/80 border border-white/10 rounded-lg p-2 grid grid-cols-2 gap-2">
-                    {availableReports.length === 0 ? (
-                      <p className="text-[10px] text-slate-600 p-2 col-span-2">Nenhum documento encontrado para anexar.</p>
-                    ) : (
-                      availableReports.map(r => (
-                        <button 
-                          key={`${r.type}-${r.id}`}
-                          type="button"
-                          onClick={() => { setAttachment({ id: r.id, title: r.title, type: r.type }); setShowAttachments(false); }}
-                          className="flex items-center gap-2 p-2 hover:bg-white/5 rounded text-left transition-colors"
-                        >
-                          <FileText className="w-3.5 h-3.5 text-blue-400" />
-                          <div className="flex flex-col min-w-0">
-                            <span className="text-xs text-slate-300 truncate">{r.title}</span>
-                            <span className="text-[8px] uppercase text-slate-600">{r.type}</span>
-                          </div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-
-                <textarea 
-                  required
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  className="w-full flex-1 min-h-[250px] bg-transparent text-sm text-slate-300 resize-none focus:outline-none py-2" 
-                  placeholder="Escreva sua mensagem aqui..."
-                />
-
-                <div className="flex justify-end pt-4 border-t border-white/5">
-                  <button 
-                    disabled={sending}
-                    className="px-8 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-sm font-bold flex items-center gap-2 shadow-xl shadow-blue-600/20"
-                  >
-                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    Enviar Documento
-                  </button>
-                </div>
-              </form>
-            </div>
-          ) : selectedEmail ? (
-            <div className="flex-1 flex flex-col p-6 overflow-y-auto">
-              <div className="flex items-center justify-between mb-8">
-                <button onClick={() => setSelectedEmail(null)} className="p-2 hover:bg-white/5 rounded-full"><ChevronLeft className="w-5 h-5 text-slate-400"/></button>
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => {
-                      setView('compose');
-                      setToEmail(selectedEmail.fromEmail === user?.email ? selectedEmail.toEmail : selectedEmail.fromEmail);
-                      setSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
-                      setBody(`\n\n--- Mensagem Original ---\nDe: ${selectedEmail.fromEmail}\nData: ${new Date(selectedEmail.timestamp?.seconds * 1000).toLocaleString()}\n\n${selectedEmail.body}`);
-                      setAttachment(null);
-                      setSelectedEmail(null);
-                    }}
-                    className="p-2 hover:bg-white/5 rounded text-slate-500 hover:text-white transition-colors"
-                    title="Responder"
-                  >
-                    <Reply className="w-5 h-5"/>
-                  </button>
-                  <button 
-                    onClick={() => handleDelete(selectedEmail.id)}
-                    className="p-2 hover:bg-red-500/20 rounded text-slate-500 hover:text-red-500 transition-colors"
-                    title="Excluir E-mail"
-                  >
-                    <Trash2 className="w-5 h-5"/>
-                  </button>
-                </div>
-              </div>
-
-              <div className="mb-6">
-                 <h2 className="text-2xl font-bold text-white mb-4">{selectedEmail.subject}</h2>
-                 <div className="flex items-center gap-3">
-                   <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center font-bold text-blue-400">
-                     {selectedEmail.fromEmail[0].toUpperCase()}
-                   </div>
-                   <div className="flex-1 min-w-0">
-                     <p className="text-sm font-bold text-white mb-0.5">{selectedEmail.fromEmail}</p>
-                     <p className="text-xs text-slate-500 truncate">Para: {selectedEmail.toEmail}</p>
-                   </div>
-                   <div className="text-right">
-                     <p className="text-xs text-slate-500">{new Date(selectedEmail.timestamp?.seconds * 1000).toLocaleString()}</p>
-                   </div>
-                 </div>
-              </div>
-
-              <div className="bg-slate-950/30 rounded-xl p-6 mb-8 border border-white/5 min-h-[200px]">
-                <p className="text-slate-300 text-sm whitespace-pre-wrap leading-relaxed">
-                  {selectedEmail.body}
-                </p>
-              </div>
-
-              {selectedEmail.attachmentId && (
-                <div className="mt-auto">
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Anexos</p>
-                  <div className="p-4 bg-slate-800/50 hover:bg-slate-800 border border-white/5 rounded-xl flex items-center justify-between transition-colors cursor-pointer group">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
-                        <FileText className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-white">
-                          {selectedEmail.attachmentType === 'mandate' ? 'Visualizar Mandado Judicial' : 'Visualizar Relatório de Investigação'}
-                        </p>
-                        <p className="text-xs text-slate-500">ID: {selectedEmail.attachmentId.slice(0, 8)}...</p>
+                  
+                  <div className="flex items-start justify-between mb-8">
+                    <div>
+                      <h2 className="text-2xl font-bold text-white mb-2">{selectedEmail.subject}</h2>
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center border border-blue-500/30">
+                          <User className="w-4 h-4 text-blue-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-slate-200">{selectedEmail.fromEmail}</p>
+                          <p className="text-[10px] text-slate-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {selectedEmail.timestamp ? new Date(selectedEmail.timestamp.seconds * 1000).toLocaleString() : ''}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                    <button 
-                      onClick={() => {
-                        const eventName = selectedEmail.attachmentType === 'mandate' ? 'open-mandate' : 'open-report';
-                        const windowId = selectedEmail.attachmentType === 'mandate' ? 'mandato' : 'relatorio';
-                        
-                        window.dispatchEvent(new CustomEvent('open-window', { detail: windowId }));
-                        
-                        // Set global pending state as fallback for mounting delay
-                        if (windowId === 'mandato') (window as any).pendingMandate = { id: selectedEmail.attachmentId, mode: 'view' };
-                        if (windowId === 'relatorio') (window as any).pendingReport = { id: selectedEmail.attachmentId, mode: 'view' };
+                    <div className="flex gap-2">
+                       <button 
+                        onClick={() => {
+                          setView('compose');
+                          setToEmail(selectedEmail.fromEmail);
+                          setSubject(`Re: ${selectedEmail.subject}`);
+                          setSelectedEmail(null);
+                        }}
+                        className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
+                        title="Responder"
+                      >
+                        <Reply className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => handleDelete(selectedEmail.id, e)}
+                        className="p-2 hover:bg-red-500/20 rounded text-slate-400 hover:text-red-500 transition-colors"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
 
-                        // Small delay to ensure the window component is mounted before sending the ID event
-                        setTimeout(() => {
-                          window.dispatchEvent(new CustomEvent(eventName, { 
-                            detail: { id: selectedEmail.attachmentId, mode: 'view' }
-                          }));
-                        }, 150);
-                      }}
-                      className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white rounded-lg text-xs font-bold transition-all flex items-center gap-2"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      ABRIR
+                  <div className="bg-slate-950/40 p-6 rounded-xl border border-white/5 text-slate-300 text-sm leading-relaxed whitespace-pre-wrap min-h-[200px]">
+                    {selectedEmail.body}
+                  </div>
+
+                  {selectedEmail.attachmentTitle && (
+                    <div className="mt-8 p-4 bg-blue-600/5 rounded-xl border border-blue-500/10 flex items-center justify-between group">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-blue-600/20 flex items-center justify-center">
+                          <FileText className="w-5 h-5 text-blue-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-white uppercase tracking-tight">{selectedEmail.attachmentTitle}</p>
+                          <p className="text-[10px] text-blue-400/60 uppercase font-bold tracking-widest">{selectedEmail.attachmentType}</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          if (selectedEmail.attachmentType === 'external') {
+                            if (selectedEmail.attachmentTitle?.endsWith('.json')) {
+                              window.dispatchEvent(new CustomEvent('open-window', { detail: 'relatorio' }));
+                              (window as any).pendingReport = { url: selectedEmail.attachmentUrl, mode: 'view' };
+                              setTimeout(() => {
+                                window.dispatchEvent(new CustomEvent('open-report', { 
+                                  detail: { url: selectedEmail.attachmentUrl, mode: 'view' }
+                                }));
+                              }, 150);
+                            } else {
+                              window.open(selectedEmail.attachmentUrl || '', '_blank');
+                            }
+                          } else {
+                            const eventName = selectedEmail.attachmentType === 'mandate' ? 'open-mandate' : 'open-report';
+                            const windowId = selectedEmail.attachmentType === 'mandate' ? 'mandato' : 'relatorio';
+                            
+                            window.dispatchEvent(new CustomEvent('open-window', { detail: windowId }));
+                            
+                            if (windowId === 'mandato') (window as any).pendingMandate = { id: selectedEmail.attachmentId, mode: 'view' };
+                            if (windowId === 'relatorio') (window as any).pendingReport = { id: selectedEmail.attachmentId, mode: 'view' };
+
+                            setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent(eventName, { 
+                                detail: { id: selectedEmail.attachmentId, mode: 'view' }
+                              }));
+                            }, 150);
+                          }
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        ABRIR DOCUMENTO
+                      </button>
+                    </div>
+                  )}
+                </motion.div>
+              ) : (
+                <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col overflow-hidden">
+                  <div className="p-4 border-b border-white/5 flex items-center gap-4">
+                    <div className="flex-1 relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                      <input type="text" placeholder="Pesquisar e-mails..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-slate-950/50 border border-white/10 rounded-lg py-2 pl-10 pr-4 text-sm text-slate-300 outline-none focus:border-blue-500/50 transition-colors" />
+                    </div>
+                    <button onClick={() => setLoading(true)} className="p-2 hover:bg-white/5 rounded text-slate-500 transition-colors">
+                      <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
                     </button>
                   </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col overflow-hidden">
-               <div className="p-4 bg-slate-950/30 border-b border-white/5 flex items-center justify-between">
-                 <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 rounded-lg border border-white/5 w-64">
-                   <Search className="w-4 h-4 text-slate-500" />
-                   <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none text-xs text-white focus:outline-none w-full" />
-                 </div>
-                 <button className="p-2 text-slate-500 hover:text-blue-400 border-none bg-transparent cursor-pointer"><RefreshCw className="w-4 h-4" /></button>
-               </div>
-               
-               <div className="flex-1 overflow-y-auto">
-                 {loading ? (
-                   <div className="h-full flex items-center justify-center">
-                     <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-                   </div>
-                 ) : emails.length === 0 ? (
-                   <div className="h-full flex flex-col items-center justify-center text-slate-600 grayscale">
-                     <Inbox className="w-16 h-16 mb-4 opacity-10" />
-                     <p className="text-sm">Nenhuma mensagem encontrada</p>
-                   </div>
-                 ) : (
-                   <div className="divide-y divide-white/5">
-                     {emails.map(email => (
-                       <div 
-                         key={email.id}
-                         onClick={() => { setSelectedEmail(email); markAsRead(email); }}
-                         className={cn(
-                           "w-full px-6 py-4 flex items-center gap-4 transition-colors text-left group cursor-pointer",
-                           !email.read && view === 'inbox' ? 'bg-blue-500/5' : 'hover:bg-white/5',
-                           selectedEmail?.id === email.id && 'bg-white/5 border-l-2 border-blue-500'
-                         )}
-                       >
-                         <div className={cn(
-                           "flex-none w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm",
-                           email.read || view === 'sent' ? 'bg-slate-800 text-slate-400' : 'bg-blue-600 text-white shadow-lg'
-                         )}>
-                           {view === 'inbox' ? email.fromEmail[0].toUpperCase() : email.toEmail[0].toUpperCase()}
-                         </div>
-                         <div className="flex-1 min-w-0">
-                           <div className="flex items-center justify-between mb-1">
-                             <p className={cn("text-sm truncate", !email.read && view === 'inbox' ? "font-bold text-white" : "text-slate-300")}>
-                               {view === 'inbox' ? email.fromEmail : `Para: ${email.toEmail}`}
-                             </p>
-                             <span className="text-[10px] text-slate-500 uppercase tracking-tighter">
-                               {email.timestamp ? new Date(email.timestamp.seconds * 1000).toLocaleDateString() : ''}
-                             </span>
-                           </div>
-                           <p className={cn("text-xs truncate", !email.read && view === 'inbox' ? "text-slate-100" : "text-slate-500")}>
-                             {email.subject}
-                           </p>
-                         </div>
-                         {email.attachmentId && (
-                           <Paperclip className="w-3.5 h-3.5 text-slate-600 group-hover:text-blue-500 shrink-0" />
-                         )}
-                         <button 
-                            onClick={(e) => handleDelete(email.id, e)}
-                            className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 text-slate-600 hover:text-red-500 rounded transition-all ml-2 border-none bg-transparent"
-                            title="Excluir"
+
+                  <div className="flex-1 overflow-y-auto custom-scrollbar">
+                    {loading ? (
+                      <div className="h-full flex items-center justify-center opacity-20">
+                        <Loader2 className="w-8 h-8 animate-spin" />
+                      </div>
+                    ) : filteredEmails.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-slate-600 opacity-20">
+                        <Inbox className="w-12 h-12 mb-2" />
+                        <p className="text-sm font-bold uppercase tracking-widest">Caixa de entrada vazia</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-white/5">
+                        {filteredEmails.map(email => (
+                          <div 
+                            key={email.id} 
+                            onClick={() => {
+                              setSelectedEmail(email);
+                              markAsRead(email);
+                            }}
+                            className={cn(
+                              "group px-6 py-4 flex items-center gap-4 cursor-pointer hover:bg-white/[0.02] transition-all relative overflow-hidden",
+                              !email.read && view === 'inbox' && "bg-blue-600/5"
+                            )}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                       </div>
-                     ))}
-                   </div>
-                 )}
-               </div>
-            </div>
-          )}
+                            {!email.read && view === 'inbox' && (
+                              <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600" />
+                            )}
+                            
+                            <div className={cn(
+                              "w-10 h-10 rounded-full flex items-center justify-center border transition-colors",
+                              !email.read && view === 'inbox' 
+                                ? "bg-blue-600/20 border-blue-500/30" 
+                                : "bg-slate-800/50 border-white/5"
+                            )}>
+                              <User className={cn(
+                                "w-5 h-5",
+                                !email.read && view === 'inbox' ? "text-blue-400" : "text-slate-500"
+                              )} />
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-0.5">
+                                <p className={cn(
+                                  "text-sm truncate",
+                                  !email.read && view === 'inbox' ? "text-white font-bold" : "text-slate-400"
+                                )}>
+                                  {view === 'inbox' ? email.fromEmail : `Para: ${email.toEmail}`}
+                                </p>
+                                <p className="text-[10px] text-slate-600">
+                                  {email.timestamp ? new Date(email.timestamp.seconds * 1000).toLocaleDateString() : ''}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <p className={cn(
+                                  "text-xs truncate flex-1 font-medium",
+                                  !email.read && view === 'inbox' ? "text-slate-200" : "text-slate-500"
+                                )}>
+                                  {email.subject}
+                                </p>
+                                {email.attachmentTitle && (
+                                  <Paperclip className="w-3 h-3 text-slate-600" />
+                                )}
+                              </div>
+                            </div>
+
+                            <button 
+                              onClick={(e) => handleDelete(email.id, e)}
+                              className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 text-slate-600 hover:text-red-500 rounded transition-all ml-2 border-none bg-transparent"
+                              title="Excluir"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
-      </div>
-    </motion.div>
-  </Rnd>
-);
+      </motion.div>
+    </Rnd>
+  );
 }
 
 function NavButton({ active, onClick, icon, label, count }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string, count?: number }) {
@@ -522,7 +536,7 @@ function NavButton({ active, onClick, icon, label, count }: { active: boolean, o
         {label}
       </div>
       {count !== undefined && count > 0 && (
-        <span className="px-1.5 py-0.5 bg-blue-600 text-white text-[10px] rounded-full min-w-[20px] text-center">
+        <span className="px-1.5 py-0.5 bg-blue-600 text-white text-[10px] rounded-full font-bold min-w-[20px] shadow-lg shadow-blue-600/20">
           {count}
         </span>
       )}

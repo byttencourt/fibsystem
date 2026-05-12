@@ -766,8 +766,53 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     const handleOpenReport = (e: any) => {
       const detail = e.detail;
       const id = typeof detail === 'string' ? detail : detail?.id;
+      const mode = detail?.mode;
+      const url = detail?.url;
       console.log("Relatorio: Evento open-report recebido", { id, detail });
-      if (id) {
+
+      if (mode === 'view') {
+        setIsSignedMode(true);
+      } else {
+        setIsSignedMode(false);
+      }
+
+      if (url) {
+        hasInitialized.current = true;
+        setLoading(true);
+        const fetchUrl = url.startsWith('/api/proxy-storage') ? url : `/api/proxy-storage?url=${encodeURIComponent(url)}`;
+        fetch(fetchUrl)
+          .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(obj => {
+             if (obj.error) throw new Error(obj.error);
+             
+             // DEBUG LOGIC
+             if ((!obj.pages || obj.pages.length === 0) && !obj.objetivo && !obj.historico && !obj.conclusao) {
+                alert("DEBUG INFO - falhou nas páginas: " + JSON.stringify(obj).substring(0, 500));
+             }
+
+             if (obj.metadata) setMetadata(obj.metadata);
+             
+             if (obj.pages && obj.pages.length > 0) {
+               setPages(obj.pages);
+             } else if (obj.objetivo || obj.historico || obj.conclusao) {
+               setPages(migrateLegacyData(obj));
+             } else {
+               setPages([]);
+             }
+             
+             if (obj.coverElements) setCoverElements(obj.coverElements);
+             setReportId(null);
+             setIsCollaborative(false);
+          })
+          .catch(err => {
+             alert('Erro ao carregar relatório anexado: ' + err.message);
+             console.error(err);
+          })
+          .finally(() => setLoading(false));
+      } else if (id) {
         hasInitialized.current = true;
         loadReport(id);
       }
@@ -786,7 +831,45 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
         hasInitialized.current = true;
         console.log("Relatorio: Carregando pendente do estado global:", pending);
         delete (window as any).pendingReport;
-        await loadReport(pending.id);
+        
+        if (pending.mode === 'view') {
+          setIsSignedMode(true);
+        }
+
+        if (pending.url) {
+          setLoading(true);
+          try {
+            const fetchUrl = pending.url.startsWith('/api/proxy-storage') ? pending.url : `/api/proxy-storage?url=${encodeURIComponent(pending.url)}`;
+            const res = await fetch(fetchUrl);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const obj = await res.json();
+            if (obj.error) throw new Error(obj.error);
+
+            if ((!obj.pages || obj.pages.length === 0) && !obj.objetivo && !obj.historico && !obj.conclusao) {
+              alert("DEBUG INFO - pendente falhou nas paginas: " + JSON.stringify(obj).substring(0, 500));
+            }
+
+            if (obj.metadata) setMetadata(obj.metadata);
+             
+            if (obj.pages && obj.pages.length > 0) {
+              setPages(obj.pages);
+            } else if (obj.objetivo || obj.historico || obj.conclusao) {
+              setPages(migrateLegacyData(obj));
+            } else {
+              setPages([]);
+            }
+            if (obj.coverElements) setCoverElements(obj.coverElements);
+            setReportId(null);
+            setIsCollaborative(false);
+          } catch(err) {
+            console.error(err);
+            alert('Erro ao carregar relatório anexado (pendente).');
+          } finally {
+            setLoading(false);
+          }
+        } else if (pending.id) {
+          await loadReport(pending.id);
+        }
         return;
       }
 
@@ -1195,32 +1278,36 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
             </div>
           )}
           <div className="text-sm font-bold text-slate-300 mr-4 tracking-tight">CAPA:</div>
-          <input type="text" placeholder="Nome da Operação" value={metadata.operationName} onChange={e => handleMetadataChange('operationName', e.target.value)} className="w-36 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" />
-          <input type="text" placeholder="Nº Diretiva" value={metadata.directiveNo} onChange={e => handleMetadataChange('directiveNo', e.target.value)} className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" />
-          <input type="text" placeholder="Nome do Agente" value={metadata.agentName} onChange={e => handleMetadataChange('agentName', e.target.value)} className="w-40 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" title="Assinatura do Agente" />
-          <input type="text" placeholder="Nome do Diretor" value={metadata.diretorName || ''} onChange={e => handleMetadataChange('diretorName', e.target.value)} className="w-40 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600" title="Assinatura da Diretoria (Opcional)" />
+          <input type="text" placeholder="Nome da Operação" disabled={isSignedMode} value={metadata.operationName} onChange={e => handleMetadataChange('operationName', e.target.value)} className="w-36 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600 disabled:opacity-50" />
+          <input type="text" placeholder="Nº Diretiva" disabled={isSignedMode} value={metadata.directiveNo} onChange={e => handleMetadataChange('directiveNo', e.target.value)} className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600 disabled:opacity-50" />
+          <input type="text" placeholder="Nome do Agente" disabled={isSignedMode} value={metadata.agentName} onChange={e => handleMetadataChange('agentName', e.target.value)} className="w-40 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600 disabled:opacity-50" title="Assinatura do Agente" />
+          <input type="text" placeholder="Nome do Diretor" disabled={isSignedMode} value={metadata.diretorName || ''} onChange={e => handleMetadataChange('diretorName', e.target.value)} className="w-40 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white placeholder:text-slate-600 disabled:opacity-50" title="Assinatura da Diretoria (Opcional)" />
         </div>
 
         <div className="flex items-center gap-2">
-          <button 
-            onClick={undo}
-            className="flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-all sm:flex hidden bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
-            title="Desfazer (Ctrl+Z)"
-          >
-            <Undo2 className="w-4 h-4" />
-            Desfazer
-          </button>
+          {!isSignedMode && (
+            <button 
+              onClick={undo}
+              className="flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-all sm:flex hidden bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
+              title="Desfazer (Ctrl+Z)"
+            >
+              <Undo2 className="w-4 h-4" />
+              Desfazer
+            </button>
+          )}
           
           <button onClick={exportToJSON} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors border border-slate-600/50">
             <ArrowDownToLine className="w-4 h-4" />
             <span className="hidden sm:inline">Exportar BKP</span>
           </button>
 
-          <label className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors border border-slate-600/50 cursor-pointer">
-            <MoveUpRight className="w-4 h-4" />
-            <span className="hidden sm:inline">Importar BKP</span>
-            <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
-          </label>
+          {!isSignedMode && (
+            <label className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-sm transition-colors border border-slate-600/50 cursor-pointer">
+              <MoveUpRight className="w-4 h-4" />
+              <span className="hidden sm:inline">Importar BKP</span>
+              <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
+            </label>
+          )}
 
           <button onClick={exportDocument} disabled={isExporting} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm transition-colors border border-blue-400/20 min-w-[140px] justify-center">
             {isExporting ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4" />}
@@ -1280,6 +1367,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                   type="text" 
                   value={metadata.classification} 
                   onChange={e => handleMetadataChange('classification', e.target.value)}
+                  readOnly={isSignedMode}
                   className="w-full text-3xl font-bold text-black/80 tracking-widest text-center mb-8 uppercase bg-transparent outline-none focus:bg-white/10 p-2 rounded" 
                 />
                 
@@ -1294,7 +1382,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
                   </div>
                   <div className="flex items-end gap-4">
                     <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Issue Date:</span>
-                    <input type="date" value={metadata.issueDate} onChange={e => handleMetadataChange('issueDate', e.target.value)} className="bg-transparent border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 outline-none w-48" />
+                    <input type="date" value={metadata.issueDate} readOnly={isSignedMode} onChange={e => handleMetadataChange('issueDate', e.target.value)} className="bg-transparent border-b-2 border-black/40 pb-1 text-lg font-mono text-black/80 outline-none w-48" />
                   </div>
                   <div className="flex items-end gap-4">
                     <span className="text-sm font-bold text-black/70 uppercase tracking-widest shrink-0">Relator:</span>
