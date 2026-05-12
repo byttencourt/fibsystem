@@ -31,6 +31,8 @@ export default function App() {
   const [isWallpaperModalOpen, setIsWallpaperModalOpen] = useState(false);
   const [wallpaperInput, setWallpaperInput] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
+  const [showEmailNotify, setShowEmailNotify] = useState(false);
+  const [hasNotified, setHasNotified] = useState(false);
 
   const [windows, setWindows] = useState<WindowState[]>([
     { id: 'mandato', title: 'Sistema de Mandados', isOpen: false, isMinimized: false, isMaximized: false, zIndex: 100 },
@@ -64,13 +66,20 @@ export default function App() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUnreadCount(snapshot.size);
+      const count = snapshot.size;
+      setUnreadCount(count);
+      
+      // Notify only once on entry if there are messages
+      if (count > 0 && !hasNotified) {
+        setShowEmailNotify(true);
+        setHasNotified(true);
+      }
     }, (error) => {
       console.error("Error listening for unread emails:", error);
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, hasNotified]);
 
   if (loading) {
     return (
@@ -222,6 +231,45 @@ export default function App() {
         })}
       </AnimatePresence>
 
+      {/* Windows 11 Style Notification */}
+      <AnimatePresence>
+        {showEmailNotify && unreadCount > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] w-[400px] bg-slate-900/80 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] p-6 flex flex-col items-center text-center gap-4"
+          >
+            <div className="w-16 h-16 bg-blue-600/20 rounded-full flex items-center justify-center border border-blue-500/30 mb-2">
+              <Mail className="w-8 h-8 text-blue-400" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-white tracking-tight">Novas Mensagens</h3>
+              <p className="text-sm text-slate-300 leading-relaxed">
+                Você tem <span className="text-blue-400 font-bold">{unreadCount}</span> {unreadCount === 1 ? 'nova mensagem' : 'novas mensagens'} de e-mail não {unreadCount === 1 ? 'lida' : 'lidas'}.
+              </p>
+            </div>
+            <div className="flex flex-col w-full gap-2 mt-2">
+              <button 
+                onClick={() => {
+                  openWindow('email');
+                  setShowEmailNotify(false);
+                }}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-[0.98]"
+              >
+                Abrir Caixa de E-mail
+              </button>
+              <button 
+                onClick={() => setShowEmailNotify(false)}
+                className="w-full py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                Lembrar mais tarde
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Wallpaper Selection Modal */}
       <AnimatePresence>
         {isWallpaperModalOpen && (
@@ -334,15 +382,16 @@ function DesktopIcon({ iconUrl, label, onClick, badge }: { iconUrl: string, labe
       onClick={onClick}
       className="w-24 flex flex-col items-center gap-2 p-2 rounded hover:bg-white/10 transition-colors group focus:outline-none focus:bg-white/20 relative"
     >
-      <div className="w-14 h-14 rounded-lg shadow-lg overflow-hidden border border-white/10 group-hover:border-white/30 transition-colors bg-slate-800 flex items-center justify-center relative">
+      <div className="w-14 h-14 rounded-lg shadow-lg overflow-hidden border border-white/10 group-hover:border-white/30 transition-colors bg-slate-800 flex items-center justify-center">
         <img src={iconUrl} alt={label} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-        
-        {badge !== undefined && badge > 0 && (
-          <div className="absolute top-0 left-0 -mt-1 -ml-1 min-w-[20px] h-5 bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 shadow-lg ring-2 ring-slate-900 animate-in zoom-in duration-300">
-            {badge > 99 ? '99+' : badge}
-          </div>
-        )}
       </div>
+      
+      {badge !== undefined && badge > 0 && (
+        <div className="absolute top-1 right-4 min-w-[20px] h-5 bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 shadow-lg ring-2 ring-slate-900 animate-in zoom-in duration-300 z-30">
+          {badge > 99 ? '99+' : badge}
+        </div>
+      )}
+
       <span className="text-xs text-center text-white drop-shadow-md font-medium leading-tight group-hover:text-blue-100">
         {label}
       </span>
