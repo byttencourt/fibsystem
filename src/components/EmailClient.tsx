@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { 
+  X, Minus, Square, Mail, Send, ChevronLeft, 
+  Trash2, Search, Inbox, SendHorizontal, Paperclip, 
   ExternalLink, User, Clock, Loader2, RefreshCw, FileText, Reply, Forward
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
