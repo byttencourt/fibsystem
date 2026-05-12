@@ -61,6 +61,8 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
   const [showAttachments, setShowAttachments] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [allUsers, setAllUsers] = useState<{email: string, displayName: string}[]>([]);
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [filteredUsers, setFilteredUsers] = useState<{email: string, displayName: string}[]>([]);
 
   useEffect(() => {
     if (view === 'compose' && allUsers.length === 0) {
@@ -156,6 +158,34 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
     } finally {
       setSending(false);
     }
+  };
+
+  const handleToEmailChange = (value: string) => {
+    setToEmail(value);
+    
+    // Get the part being typed after the last comma
+    const parts = value.split(',');
+    const currentPart = parts[parts.length - 1].trim().toLowerCase();
+    
+    if (currentPart.length > 0) {
+      const filtered = allUsers.filter(u => 
+        u.displayName.toLowerCase().includes(currentPart) || 
+        u.email.toLowerCase().includes(currentPart)
+      );
+      setFilteredUsers(filtered);
+      setShowUserDropdown(filtered.length > 0);
+    } else {
+      setShowUserDropdown(false);
+    }
+  };
+
+  const selectUser = (selectedUser: {email: string, displayName: string}) => {
+    const parts = toEmail.split(',');
+    // If it's not the first element, keep the spaces
+    parts[parts.length - 1] = parts.length > 1 ? ` ${selectedUser.email}` : selectedUser.email;
+    const newValue = parts.join(',').trim() + ', ';
+    setToEmail(newValue);
+    setShowUserDropdown(false);
   };
 
   const fetchReports = async () => {
@@ -318,9 +348,39 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
               {view === 'compose' ? (
                 <motion.div key="compose" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex-1 flex flex-col p-6 overflow-y-auto custom-scrollbar">
                   <form onSubmit={handleSend} className="space-y-4">
-                    <div className="space-y-1">
-                      <input type="text" required value={toEmail} onChange={(e) => setToEmail(e.target.value)} list="user-emails" className="bg-transparent border-b border-white/5 pb-2 text-sm text-white w-full outline-none focus:border-blue-500 transition-colors" placeholder="Para (separe múltiplos por vírgula):" />
-                      <datalist id="user-emails">{allUsers.map(u => <option key={u.email} value={u.email} label={u.displayName} />)}</datalist>
+                    <div className="space-y-1 relative">
+                      <input 
+                        type="text" 
+                        required 
+                        value={toEmail} 
+                        onChange={(e) => handleToEmailChange(e.target.value)} 
+                        className="bg-transparent border-b border-white/5 pb-2 text-sm text-white w-full outline-none focus:border-blue-500 transition-colors" 
+                        placeholder="Para (separe múltiplos por vírgula):" 
+                        onBlur={() => setTimeout(() => setShowUserDropdown(false), 200)}
+                      />
+                      
+                      <AnimatePresence>
+                        {showUserDropdown && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="absolute top-full left-0 w-full mt-1 bg-slate-900 border border-white/10 rounded-lg shadow-2xl z-[100] max-h-48 overflow-y-auto custom-scrollbar"
+                          >
+                            {filteredUsers.map(u => (
+                              <button
+                                key={u.email}
+                                type="button"
+                                onClick={() => selectUser(u)}
+                                className="w-full text-left px-4 py-2 hover:bg-blue-600/20 flex flex-col transition-colors border-b border-white/5 last:border-0"
+                              >
+                                <span className="text-sm font-bold text-white">{u.displayName}</span>
+                                <span className="text-[10px] text-slate-500">{u.email}</span>
+                              </button>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                     <input type="text" required value={subject} onChange={(e) => setSubject(e.target.value)} className="bg-transparent border-b border-white/5 pb-2 text-sm text-white w-full outline-none focus:border-blue-500 transition-colors" placeholder="Assunto:" />
                     
