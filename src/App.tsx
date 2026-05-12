@@ -9,6 +9,8 @@ import { signOut } from 'firebase/auth';
 import { auth } from './lib/firebase';
 import { EmailWindow } from './components/EmailClient';
 import { AdminWindow } from './components/AdminPanel';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from './lib/firebase';
 
 // --- Types ---
 type WindowState = {
@@ -28,6 +30,7 @@ export default function App() {
   const [customWallpaper, setCustomWallpaper] = useState<string | null>(localStorage.getItem('desktop_wallpaper'));
   const [isWallpaperModalOpen, setIsWallpaperModalOpen] = useState(false);
   const [wallpaperInput, setWallpaperInput] = useState('');
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const [windows, setWindows] = useState<WindowState[]>([
     { id: 'mandato', title: 'Sistema de Mandados', isOpen: false, isMinimized: false, isMaximized: false, zIndex: 100 },
@@ -50,6 +53,24 @@ export default function App() {
       window.removeEventListener('open-window', handleOpenWindow);
     };
   }, [windows]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, 'emails'), 
+      where('toId', '==', user.uid), 
+      where('read', '==', false)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadCount(snapshot.size);
+    }, (error) => {
+      console.error("Error listening for unread emails:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   if (loading) {
     return (
@@ -164,6 +185,7 @@ export default function App() {
           iconUrl="https://img.icons8.com/color/512/gmail-new.png" 
           label="Caixa de E-mail" 
           onClick={() => openWindow('email')} 
+          badge={unreadCount}
         />
         {(profile?.role === 'admin' || (user?.email && ['nino.byttencourt@gmail.com', 'byttencourt@hotmail.com'].includes(user.email.toLowerCase()))) && (
           <DesktopIcon 
@@ -306,14 +328,20 @@ export default function App() {
 }
 
 // --- Desktop Icon Component ---
-function DesktopIcon({ iconUrl, label, onClick }: { iconUrl: string, label: string, onClick: () => void }) {
+function DesktopIcon({ iconUrl, label, onClick, badge }: { iconUrl: string, label: string, onClick: () => void, badge?: number }) {
   return (
     <button 
       onClick={onClick}
-      className="w-24 flex flex-col items-center gap-2 p-2 rounded hover:bg-white/10 transition-colors group focus:outline-none focus:bg-white/20"
+      className="w-24 flex flex-col items-center gap-2 p-2 rounded hover:bg-white/10 transition-colors group focus:outline-none focus:bg-white/20 relative"
     >
-      <div className="w-14 h-14 rounded-lg shadow-lg overflow-hidden border border-white/10 group-hover:border-white/30 transition-colors bg-slate-800 flex items-center justify-center">
+      <div className="w-14 h-14 rounded-lg shadow-lg overflow-hidden border border-white/10 group-hover:border-white/30 transition-colors bg-slate-800 flex items-center justify-center relative">
         <img src={iconUrl} alt={label} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        
+        {badge !== undefined && badge > 0 && (
+          <div className="absolute top-0 left-0 -mt-1 -ml-1 min-w-[20px] h-5 bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 shadow-lg ring-2 ring-slate-900 animate-in zoom-in duration-300">
+            {badge > 99 ? '99+' : badge}
+          </div>
+        )}
       </div>
       <span className="text-xs text-center text-white drop-shadow-md font-medium leading-tight group-hover:text-blue-100">
         {label}
