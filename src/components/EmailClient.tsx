@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, Minus, Square, Mail, Send, ChevronLeft, 
-  Trash2, Search, Inbox, SendHorizontal, Paperclip, 
-  ExternalLink, User, Clock, Loader2, RefreshCw, FileText, Reply
+  ExternalLink, User, Clock, Loader2, RefreshCw, FileText, Reply, Forward
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Rnd } from 'react-rnd';
@@ -60,13 +57,16 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
   const [availableReports, setAvailableReports] = useState<{id: string, title: string, type: 'report' | 'mandate'}[]>([]);
   const [showAttachments, setShowAttachments] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [allUsers, setAllUsers] = useState<string[]>([]);
+  const [allUsers, setAllUsers] = useState<{email: string, displayName: string}[]>([]);
 
   useEffect(() => {
     if (view === 'compose' && allUsers.length === 0) {
       getDocs(collection(db, 'users')).then(snapshot => {
-        const emails = snapshot.docs.map(doc => doc.data().email as string);
-        setAllUsers(emails);
+        const users = snapshot.docs.map(doc => ({
+          email: doc.data().email as string,
+          displayName: (doc.data().displayName || doc.data().name || 'Usuário') as string
+        }));
+        setAllUsers(users);
       });
     }
   }, [view]);
@@ -97,39 +97,48 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
 
     setSending(true);
     try {
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', toEmail));
-      const querySnapshot = await getDocs(q);
+      const recipientEmails = toEmail.split(',').map(e => e.trim()).filter(e => e !== '');
       
-      if (querySnapshot.empty) {
-        throw new Error('Destinatário não encontrado no sistema.');
+      if (recipientEmails.length === 0) {
+        throw new Error('Por favor, insira pelo menos um destinatário.');
       }
 
-      const recipientId = querySnapshot.docs[0].id;
+      for (const email of recipientEmails) {
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('email', '==', email));
+        const querySnapshot = await getDocs(q);
+        
+        if (querySnapshot.empty) {
+          console.warn(`Destinatário ${email} não encontrado.`);
+          continue; // Pula destinatários não encontrados
+        }
 
-      const emailData = {
-        fromId: user.uid,
-        fromEmail: user.email,
-        toId: recipientId,
-        toEmail: toEmail,
-        subject,
-        body,
-        attachmentId: attachment?.id || null,
-        attachmentType: attachment?.type || null,
-        attachmentUrl: attachment?.url || null,
-        attachmentTitle: attachment?.title || null,
-        read: false,
-        timestamp: serverTimestamp()
-      };
+        const recipientId = querySnapshot.docs[0].id;
 
-      await addDoc(collection(db, 'emails'), emailData);
+        const emailData = {
+          fromId: user.uid,
+          fromEmail: user.email,
+          toId: recipientId,
+          toEmail: email,
+          subject,
+          body,
+          attachmentId: attachment?.id || null,
+          attachmentType: attachment?.type || null,
+          attachmentUrl: attachment?.url || null,
+          attachmentTitle: attachment?.title || null,
+          read: false,
+          timestamp: serverTimestamp()
+        };
 
-      if (attachment && attachment.type !== 'external' && attachment.id) {
-        const collectionName = attachment.type === 'mandate' ? 'mandates' : 'reports';
-        const docRef = doc(db, collectionName, attachment.id);
-        await updateDoc(docRef, {
-          sharedWith: arrayUnion(recipientId)
-        });
+        await addDoc(collection(db, 'emails'), emailData);
+
+        if (attachment && attachment.type !== 'external' && attachment.id) {
+          const collectionName = attachment.type === 'mandate' ? 'mandates' : 'reports';
+          const docRef = doc(db, collectionName, attachment.id);
+          await updateDoc(docRef, {
+            sharedWith: arrayUnion(recipientId)
+          });
+        }
       }
 
       setView('inbox');
@@ -137,7 +146,7 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
       setToEmail('');
       setBody('');
       setAttachment(null);
-      alert('E-mail enviado com sucesso!');
+      alert('E-mail(s) enviado(s) com sucesso!');
     } catch (err: any) {
       console.error("Error sending email:", err);
       alert(err.message);
@@ -307,8 +316,8 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                 <motion.div key="compose" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex-1 flex flex-col p-6 overflow-y-auto custom-scrollbar">
                   <form onSubmit={handleSend} className="space-y-4">
                     <div className="space-y-1">
-                      <input type="email" required value={toEmail} onChange={(e) => setToEmail(e.target.value)} list="user-emails" className="bg-transparent border-b border-white/5 pb-2 text-sm text-white w-full outline-none focus:border-blue-500 transition-colors" placeholder="Para:" />
-                      <datalist id="user-emails">{allUsers.map(email => <option key={email} value={email} />)}</datalist>
+                      <input type="text" required value={toEmail} onChange={(e) => setToEmail(e.target.value)} list="user-emails" className="bg-transparent border-b border-white/5 pb-2 text-sm text-white w-full outline-none focus:border-blue-500 transition-colors" placeholder="Para (separe múltiplos por vírgula):" />
+                      <datalist id="user-emails">{allUsers.map(u => <option key={u.email} value={u.email} label={u.displayName} />)}</datalist>
                     </div>
                     <input type="text" required value={subject} onChange={(e) => setSubject(e.target.value)} className="bg-transparent border-b border-white/5 pb-2 text-sm text-white w-full outline-none focus:border-blue-500 transition-colors" placeholder="Assunto:" />
                     
@@ -381,6 +390,26 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                         title="Responder"
                       >
                         <Reply className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setView('compose');
+                          setSubject(`Fwd: ${selectedEmail.subject}`);
+                          setBody(`\n\n---------- Mensagem Encaminhada ----------\nDe: ${selectedEmail.fromEmail}\nData: ${selectedEmail.timestamp ? new Date(selectedEmail.timestamp.seconds * 1000).toLocaleString() : ''}\nAssunto: ${selectedEmail.subject}\n\n${selectedEmail.body}`);
+                          if (selectedEmail.attachmentTitle) {
+                            setAttachment({
+                              id: selectedEmail.attachmentId || undefined,
+                              title: selectedEmail.attachmentTitle,
+                              type: selectedEmail.attachmentType || 'external',
+                              url: selectedEmail.attachmentUrl || undefined
+                            });
+                          }
+                          setSelectedEmail(null);
+                        }}
+                        className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
+                        title="Encaminhar"
+                      >
+                        <Forward className="w-4 h-4" />
                       </button>
                       <button 
                         onClick={(e) => handleDelete(selectedEmail.id, e)}
