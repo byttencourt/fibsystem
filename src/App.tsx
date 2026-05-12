@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Power, FileText, Mail, ShieldAlert, LogOut, Loader2, Settings } from 'lucide-react';
-import { AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { MandatoWindow } from './Mandato';
 import { RelatorioWindow } from './Relatorio';
 import { useAuth } from './contexts/AuthContext';
