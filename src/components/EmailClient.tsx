@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Minus, Square, Mail, Send, ChevronLeft, 
   Trash2, Search, Inbox, SendHorizontal, Paperclip, 
-  ExternalLink, User, Clock, Loader2, RefreshCw, FileText, Reply, Forward
+  ExternalLink, User, Clock, Loader2, RefreshCw, FileText, Reply, Forward, Settings
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Rnd } from 'react-rnd';
@@ -48,9 +48,17 @@ interface WindowProps {
 export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFocus, zIndex }: WindowProps) {
   const { profile, user } = useAuth();
   const [emails, setEmails] = useState<Email[]>([]);
-  const [view, setView] = useState<'inbox' | 'sent' | 'compose'>('inbox');
+  const [view, setView] = useState<'inbox' | 'sent' | 'compose' | 'settings'>('inbox');
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [loading, setLoading] = useState(true);
+  const [signature, setSignature] = useState('');
+
+  useEffect(() => {
+    if (user) {
+      const savedSig = localStorage.getItem(`email_signature_${user.uid}`);
+      if (savedSig) setSignature(savedSig);
+    }
+  }, [user]);
   
   const [toEmail, setToEmail] = useState('');
   const [subject, setSubject] = useState('');
@@ -332,7 +340,14 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
           {/* Sidebar */}
           <div className="w-56 bg-slate-950/50 border-r border-white/5 p-4 flex flex-col gap-2">
             <button 
-              onClick={() => { setView('compose'); setSelectedEmail(null); }}
+              onClick={() => { 
+                setView('compose'); 
+                setSelectedEmail(null); 
+                setSubject('');
+                setToEmail('');
+                setAttachment(null);
+                setBody(signature ? `\n\n\n--\n${signature}` : '');
+              }}
               className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2 mb-4 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
             >
               <Send className="w-4 h-4" />
@@ -341,6 +356,8 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
 
             <NavButton active={view === 'inbox'} onClick={() => { setView('inbox'); setSelectedEmail(null); }} icon={<Inbox className="w-4 h-4" />} label="Entrada" count={emails.filter(e => !e.read && e.toId === user?.uid).length} />
             <NavButton active={view === 'sent'} onClick={() => { setView('sent'); setSelectedEmail(null); }} icon={<SendHorizontal className="w-4 h-4" />} label="Enviados" />
+            <div className="flex-1" />
+            <NavButton active={view === 'settings'} onClick={() => { setView('settings'); setSelectedEmail(null); }} icon={<Settings className="w-4 h-4" />} label="Configurações" />
           </div>
 
           <div className="flex-1 flex flex-col bg-slate-900/30 overflow-hidden">
@@ -442,11 +459,12 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                       </div>
                     </div>
                     <div className="flex gap-2">
-                       <button 
+                      <button 
                         onClick={() => {
                           setView('compose');
                           setToEmail(selectedEmail.fromEmail);
                           setSubject(`Re: ${selectedEmail.subject}`);
+                          setBody(signature ? `\n\n\n--\n${signature}` : '');
                           setSelectedEmail(null);
                         }}
                         className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
@@ -458,7 +476,7 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                         onClick={() => {
                           setView('compose');
                           setSubject(`Fwd: ${selectedEmail.subject}`);
-                          setBody(`\n\n---------- Mensagem Encaminhada ----------\nDe: ${selectedEmail.fromEmail}\nData: ${selectedEmail.timestamp ? new Date(selectedEmail.timestamp.seconds * 1000).toLocaleString() : ''}\nAssunto: ${selectedEmail.subject}\n\n${selectedEmail.body}`);
+                          setBody(`${signature ? `\n\n\n--\n${signature}\n` : ''}\n\n---------- Mensagem Encaminhada ----------\nDe: ${selectedEmail.fromEmail}\nData: ${selectedEmail.timestamp ? new Date(selectedEmail.timestamp.seconds * 1000).toLocaleString() : ''}\nAssunto: ${selectedEmail.subject}\n\n${selectedEmail.body}`);
                           if (selectedEmail.attachmentTitle) {
                             setAttachment({
                               id: selectedEmail.attachmentId || undefined,
@@ -536,6 +554,35 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                       </button>
                     </div>
                   )}
+                </motion.div>
+              ) : view === 'settings' ? (
+                <motion.div key="settings" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex-1 flex flex-col p-6 overflow-y-auto custom-scrollbar">
+                  <h2 className="text-xl font-bold text-white mb-6">Configurações</h2>
+                  
+                  <div className="space-y-4 max-w-xl">
+                    <div className="space-y-2">
+                      <label className="block text-sm font-bold text-slate-300">Assinatura de E-mail</label>
+                      <p className="text-xs text-slate-500 mb-2">Esta assinatura será adicionada automaticamente ao final das suas mensagens (novos e-mails, respostas e encaminhamentos).</p>
+                      <textarea 
+                        value={signature}
+                        onChange={(e) => setSignature(e.target.value)}
+                        className="w-full h-40 bg-slate-950/50 border border-white/10 rounded-lg p-3 text-sm text-slate-300 outline-none focus:border-blue-500/50 transition-colors custom-scrollbar resize-none"
+                        placeholder="Atenciosamente,&#10;Seu Nome&#10;Seu Cargo"
+                      />
+                    </div>
+                    
+                    <button 
+                      onClick={() => {
+                        if (user) {
+                          localStorage.setItem(`email_signature_${user.uid}`, signature);
+                          alert('Assinatura salva com sucesso!');
+                        }
+                      }}
+                      className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+                    >
+                      Salvar Assinatura
+                    </button>
+                  </div>
                 </motion.div>
               ) : (
                 <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col overflow-hidden">
