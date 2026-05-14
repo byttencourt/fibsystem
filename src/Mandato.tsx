@@ -1201,35 +1201,28 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
   if (formData.parecerJuiz || (formData.statusMandado && formData.statusMandado !== 'Pendente')) {
     const textAvailable = formData.parecerJuiz || '';
     const paragraphs = textAvailable.split('\n');
-    const MAX_CHARS_PER_BLOCK = 1200;
+    const MAX_CHARS_PER_BLOCK = 2400;
     
     let currentParecerText = '';
     let currentCount = 0;
     let blockIdx = 0;
 
     const renderParecer = (text: string, isFirst: boolean, idx: number) => (
-      <section key={`parecer_${idx}`} className="mb-8 bg-gray-50 p-6 border-2 border-black/10 rounded-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 opacity-[0.03] pointer-events-none transform translate-x-10 -translate-y-10 group">
-           {sealBase64 && <img src={sealBase64} alt="" className="w-full h-full object-contain grayscale" />}
-        </div>
-        
+      <section key={`parecer_${idx}`} className="mb-8">
         {isFirst ? (
           <>
-            <h3 className="font-bold text-lg mb-4 border-b-2 border-black/20 pb-2 text-blue-900 uppercase tracking-tighter">6. DECISÃO JUDICIAL</h3>
-            <div className="flex gap-4 mb-6">
-               <div className={`px-4 py-1.5 text-white text-xs font-black uppercase tracking-[0.2em] rounded shadow-sm ${
-                 formData.statusMandado?.includes('Aprovado') ? 'bg-emerald-700' : 
-                 formData.statusMandado === 'Negado' ? 'bg-red-800' : 'bg-slate-800'
-               }`}>
-                 DECISÃO: {formData.statusMandado || 'PENDENTE'}
-               </div>
-            </div>
+            <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">6. DECISÃO JUDICIAL</h3>
+            <p className="mb-4 text-sm leading-relaxed text-justify">
+              Decisão: <strong>{formData.statusMandado || 'Pendente'}</strong>
+            </p>
           </>
         ) : (
-          <h3 className="font-bold text-lg mb-4 border-b-2 border-black/20 pb-2 text-black/40 uppercase tracking-tighter">6. DECISÃO JUDICIAL (Continuação)</h3>
+          <h3 className="font-bold text-lg mb-3 border-b-2 border-black/20 pb-1 uppercase tracking-tight">6. DECISÃO JUDICIAL (Continuação)</h3>
         )}
-        <p className="font-bold text-[10px] uppercase tracking-[0.2em] text-black/40 mb-3 block">Fundamentação e Dispositivo Jurídico:</p>
-        <p className="whitespace-pre-wrap text-[13px] text-justify leading-relaxed font-serif text-black/85">{text || 'O magistrado não incluiu observações adicionais no parecer.'}</p>
+        <div className="bg-black/[0.01] p-4 border-l-2 border-black/20 overflow-hidden">
+          <p className="font-bold text-[10px] uppercase tracking-wider text-black/50 mb-2">Fundamentação e Dispositivo Jurídico:</p>
+          <p className="whitespace-pre-wrap text-sm text-justify leading-relaxed text-black/90 italic break-words">{text || 'O magistrado não incluiu observações adicionais no parecer.'}</p>
+        </div>
       </section>
     );
 
@@ -1238,10 +1231,13 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
         const textToUse = currentParecerText;
         const isFirst = blockIdx === 0;
         const idx = blockIdx;
+        const textHeight = Math.ceil(currentCount / charsPerLine) * 23;
+        const blockHeight = isFirst ? Math.max(180, textHeight + 180) : Math.max(140, textHeight + 140);
+
         allBlocks.push({
           id: `parecer_${idx}`,
-          height: 450,
-          forceNewPage: isFirst, // Start decision on a new page (Page 4)
+          height: blockHeight,
+          forceNewPage: isFirst, 
           render: () => renderParecer(textToUse, isFirst, idx)
         });
         currentParecerText = p + '\n';
@@ -1253,14 +1249,17 @@ function DocumentPreview({ formData, onBack }: { formData: MandadoData, onBack: 
       }
     });
 
-    if (currentParecerText) {
+    if (currentParecerText !== '' || blockIdx === 0) {
       const textToUse = currentParecerText;
       const isFirst = blockIdx === 0;
       const idx = blockIdx;
+      const textHeight = Math.ceil(currentCount / charsPerLine) * 23;
+      const blockHeight = isFirst ? Math.max(180, textHeight + 180) : Math.max(140, textHeight + 140);
+
       allBlocks.push({
         id: `parecer_final`,
-        height: 380,
-        forceNewPage: isFirst, // Start decision on a new page (Page 4)
+        height: blockHeight,
+        forceNewPage: isFirst, 
         render: () => renderParecer(textToUse, isFirst, idx)
       });
     }
