@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Application user profile and permissions.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "doj", "fib", "judge", "lspd"] },
+        "status": { "type": "string", "enum": ["pending", "active", "inactive"] },
+        "wallpaperUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "status"]
+    },
+    "Email": {
+      "title": "Email",
+      "description": "Internal communication message.",
+      "type": "object",
+      "properties": {
+        "fromId": { "type": "string", "description": "Sender UID" },
+        "fromEmail": { "type": "string" },
+        "toId": { "type": "string", "description": "Recipient UID" },
+        "toEmail": { "type": "string" },
+        "subject": { "type": "string" },
+        "body": { "type": "string" },
+        "attachmentId": { "type": "string", "description": "Optional Firestore ID of a document or report" },
+        "attachmentType": { "type": "string", "enum": ["report", "mandate"] },
+        "read": { "type": "boolean" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fromId", "toId", "subject", "body", "read", "timestamp"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Saved investigation report.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "data": { "type": "object", "description": "JSON serialized report pages" },
+        "ownerId": { "type": "string" },
+        "sharedWith": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "data", "ownerId", "createdAt"]
+    },
+    "Mandate": {
+      "title": "Mandate",
+      "description": "Judicial warrant or mandate document.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "data": { "type": "object", "description": "Mandate form data" },
+        "ownerId": { "type": "string" },
+        "sharedWith": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["Pendente", "Aprovado", "Negado"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "data", "ownerId", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/emails/{emailId}": {
+      "schema": "Email",
+      "description": "Internal messages"
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Investigation reports"
+    },
+    "/mandates/{mandateId}": {
+      "schema": "Mandate",
+      "description": "Judicial warrants"
+    }
+  }
+}

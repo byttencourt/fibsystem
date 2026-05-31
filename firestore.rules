@@ -1,0 +1,133 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // --- Global Deny ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isHardcodedAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email.lower() == 'byttencourt@hotmail.com' ||
+        request.auth.token.email.lower() == 'nino.byttencourt@gmail.com'
+      );
+    }
+
+    function isAdmin() {
+      return isHardcodedAdmin() || (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- User Profiles ---
+    match /users/{userId} {
+      allow read: if true; 
+      allow create: if isOwner(userId) || !isSignedIn();
+      allow update: if isOwner(userId) || isAdmin() || !isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    // --- Emails ---
+    match /emails/{emailId} {
+      function isValidEmail(data) {
+        return data.keys().hasAll(['fromId', 'fromEmail', 'toId', 'toEmail', 'subject', 'body', 'read', 'timestamp']) &&
+               data.fromId is string &&
+               data.toId is string &&
+               data.read is bool;
+      }
+
+      allow create: if ((isSignedIn() && incoming().fromId == request.auth.uid) || !isSignedIn()) && isValidEmail(incoming());
+      
+      allow read: if (isSignedIn() && (
+        resource.data.toId == request.auth.uid || 
+        resource.data.fromId == request.auth.uid ||
+        isAdmin()
+      )) || resource.data.toId != "";
+
+      allow update: if isSignedIn() && 
+                      (resource.data.toId == request.auth.uid || isAdmin()) && 
+                      incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+    }
+
+    // --- Reports ---
+    match /reports/{reportId} {
+      function isValidReport(data) {
+        return data.keys().hasAll(['title', 'metadata', 'pages', 'coverElements', 'ownerId', 'createdAt', 'sharedWith']) &&
+               data.ownerId is string &&
+               data.pages is list &&
+               data.sharedWith is list;
+      }
+
+      allow create: if ((isSignedIn() && incoming().ownerId == request.auth.uid) || !isSignedIn()) && isValidReport(incoming());
+      
+      allow read: if (isSignedIn() && (
+        resource.data.ownerId == request.auth.uid || 
+        (request.auth.uid in resource.data.sharedWith) ||
+        isAdmin()
+      )) || resource.data.ownerId != "";
+
+      allow update: if (isSignedIn() && (
+        (resource.data.ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'metadata', 'pages', 'coverElements', 'updatedAt', 'sharedWith'])) ||
+        (request.auth.uid in resource.data.sharedWith && incoming().diff(existing()).affectedKeys().hasOnly(['metadata', 'pages', 'coverElements', 'updatedAt'])) ||
+        isAdmin()
+      )) || (!isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'metadata', 'pages', 'coverElements', 'updatedAt', 'sharedWith']));
+
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid) || (!isSignedIn() && resource.data.ownerId != "");
+    }
+
+    // --- Mandates ---
+    match /mandates/{mandateId} {
+      function isValidMandate(data) {
+        return data.keys().hasAll(['title', 'data', 'ownerId', 'sharedWith', 'status', 'createdAt']) &&
+               data.ownerId is string &&
+               data.sharedWith is list &&
+               (data.status in ['Pendente', 'pendente', 'Aprovado', 'Aprovado com Restrições', 'Negado']);
+      }
+
+      // Permitimos criação mesmo sem auth plena para usuários de teste (Quick Auth), 
+      // mas mantemos validação de esquema rigorosa.
+      allow create: if ((isSignedIn() && incoming().ownerId == request.auth.uid) || !isSignedIn()) && isValidMandate(incoming());
+      
+      allow read: if (isSignedIn() && (
+        resource.data.ownerId == request.auth.uid || 
+        (request.auth.uid in resource.data.sharedWith) ||
+        resource.data.ownerId == "admin_id" || // Fallback para mandados de sistema
+        isAdmin()
+      )) || resource.data.ownerId != ""; // Permite leitura básica (para compartilhamento via link)
+
+      allow update: if (isSignedIn() && (
+        (resource.data.ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'data', 'sharedWith', 'status', 'updatedAt'])) ||
+        (request.auth.uid in resource.data.sharedWith && incoming().diff(existing()).affectedKeys().hasOnly(['data', 'status', 'updatedAt', 'sharedWith'])) ||
+        isAdmin()
+      )) || (!isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['data', 'status', 'updatedAt', 'juizAssinatura', 'parecerJuiz', 'statusMandado']));
+
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid) || (!isSignedIn() && resource.data.ownerId != "");
+    }
+
+    // --- File Uploads (Chunks) ---
+    match /file_uploads/{fileId} {
+      allow read, write: if true; 
+      match /chunks/{chunkId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}
