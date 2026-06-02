@@ -1,14 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
 const getEnv = (key: string) => {
-  return import.meta.env[key] || 
+  const val = import.meta.env[key] || 
          (globalThis as any)?.process?.env?.[key] || 
          (typeof process !== 'undefined' ? process.env[key] : '') ||
          '';
+  return val.trim().replace(/^['"]|['"]$/g, '').trim();
 };
 
-const supabaseUrl = getEnv('VITE_SUPABASE_URL');
-const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
+let supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
+if (supabaseUrl && !supabaseUrl.startsWith('http://') && !supabaseUrl.startsWith('https://')) {
+  supabaseUrl = 'https://' + supabaseUrl;
+}
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY');
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn("Supabase: Variáveis de ambiente ausentes.", { 

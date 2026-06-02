@@ -835,7 +835,11 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
         if (pending.url) {
           setLoading(true);
           try {
-            const fetchUrl = pending.url.startsWith('/api/proxy-storage') ? pending.url : `/api/proxy-storage?url=${encodeURIComponent(pending.url)}`;
+            const rawUrl = pending.url.trim().replace(/^['"]|['"]$/g, '');
+            const fetchUrl = rawUrl.startsWith('/api/proxy-storage') 
+              ? rawUrl 
+              : `/api/proxy-storage?url=${encodeURIComponent(rawUrl)}`;
+            console.log("Fazendo fetch via proxy do Supabase:", fetchUrl);
             const res = await fetch(fetchUrl);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const obj = await res.json();
