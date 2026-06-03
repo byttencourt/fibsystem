@@ -795,7 +795,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
 
         if (url) {
           setLoading(true);
-<<<<<<< HEAD
           const rawUrl = url.trim().replace(/^['"]|['"]$/g, '');
           const fetchUrl = rawUrl.startsWith('/api/proxy-storage') 
             ? rawUrl 
@@ -829,39 +828,6 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
             .finally(() => setLoading(false));
         } else if (id) {
           loadReport(id);
-=======
-          try {
-            const rawUrl = pending.url.trim().replace(/^['"]|['"]$/g, '');
-            const fetchUrl = rawUrl.startsWith('/api/proxy-storage') 
-              ? rawUrl 
-              : `/api/proxy-storage?url=${encodeURIComponent(rawUrl)}`;
-            console.log("Fazendo fetch via proxy do Supabase:", fetchUrl);
-            const res = await fetch(fetchUrl);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const obj = await res.json();
-            if (obj.error) throw new Error(obj.error);
-
-            if (obj.metadata) setMetadata(obj.metadata);
-             
-            if (obj.pages && obj.pages.length > 0) {
-              setPages(obj.pages);
-            } else if (obj.objetivo || obj.historico || obj.conclusao) {
-              setPages(migrateLegacyData(obj));
-            } else {
-              setPages([]);
-            }
-            if (obj.coverElements) setCoverElements(obj.coverElements);
-            setReportId(null);
-            setIsCollaborative(false);
-          } catch(err) {
-            console.error(err);
-            alert('Erro ao carregar relatório anexado (pendente).');
-          } finally {
-            setLoading(false);
-          }
-        } else if (pending.id) {
-          await loadReport(pending.id);
->>>>>>> a793b99775ef2da61ac69cb824a8b6b48e4ad214
         }
       }
     }, 150);

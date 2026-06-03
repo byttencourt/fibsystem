@@ -85,7 +85,6 @@ async function startServer() {
     } catch (error: any) {
       console.error('Proxy error:', error);
       res.status(500).json({ error: 'Failed to proxy request', details: error?.message || String(error) });
-<<<<<<< HEAD
     }
   });
 
@@ -142,8 +141,6 @@ async function startServer() {
     } catch (error: any) {
       console.error('Server upload proxy error:', error);
       return res.status(500).json({ error: error?.message || String(error) });
-=======
->>>>>>> a793b99775ef2da61ac69cb824a8b6b48e4ad214
     }
   });
 
