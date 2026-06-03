@@ -88,62 +88,6 @@ async function startServer() {
     }
   });
 
-  // Proxy endpoint para upload no Supabase
-  app.post("/api/upload-storage", express.raw({ type: '*/*', limit: '20mb' }), async (req, res) => {
-    try {
-      const fileName = (req.headers['x-file-name'] as string) || 'arquivo.json';
-      const contentType = (req.headers['content-type'] as string) || 'application/octet-stream';
-
-      let supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim().replace(/^['"]|['"]$/g, '');
-      const supabaseAnonKey = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim().replace(/^['"]|['"]$/g, '');
-
-      if (!supabaseUrl || !supabaseAnonKey) {
-        console.error("Supabase credentials missing on server.");
-        return res.status(500).json({ error: "Supabase credentials are not configured on the server." });
-      }
-
-      if (!supabaseUrl.startsWith('http://') && !supabaseUrl.startsWith('https://')) {
-        supabaseUrl = 'https://' + supabaseUrl;
-      }
-
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-      // Certificar-se de que o bucket 'attachments' existe
-      try {
-        await supabase.storage.createBucket('attachments', { public: true });
-      } catch (err) {
-        // Ignorar se já existe ou falhar tolerável
-      }
-
-      const sanitizedName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const filePath = `emails/${Date.now()}_${sanitizedName}`;
-
-      console.log(`Server: Uploading file ${fileName} to Supabase path: ${filePath}`);
-      const { data: uploadData, error: uploadError } = await supabase.storage.from('attachments').upload(filePath, req.body, {
-        contentType,
-        duplex: 'half'
-      });
-
-      if (uploadError) {
-        console.error("Supabase server upload error:", uploadError);
-        return res.status(500).json({ error: uploadError.message });
-      }
-
-      const { data: publicUrlData } = supabase.storage.from('attachments').getPublicUrl(filePath);
-
-      if (!publicUrlData?.publicUrl) {
-        throw new Error('Failed to retrieve public URL from Supabase.');
-      }
-
-      console.log("Server: File uploaded successfully, public URL retrieved:", publicUrlData.publicUrl);
-      return res.status(200).json({ url: publicUrlData.publicUrl });
-    } catch (error: any) {
-      console.error('Server upload proxy error:', error);
-      return res.status(500).json({ error: error?.message || String(error) });
-    }
-  });
-
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
