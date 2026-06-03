@@ -233,6 +233,7 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
     setSending(true);
     setShowAttachments(false);
     try {
+<<<<<<< HEAD
       const response = await fetch('/api/upload-storage', {
         method: 'POST',
         headers: {
@@ -257,6 +258,40 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
       }
 
       const directUrl = resData.url.trim().replace(/^['"]|['"]$/g, '');
+=======
+      const { supabase } = await import('../lib/supabase');
+      if (!supabase) {
+        throw new Error("O Supabase não está configurado. Verifique se as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY foram inseridas corretamente nos Secrets.");
+      }
+
+      // Tenta criar preventivamente o bucket 'attachments' caso ele não exista ou precise de iniciação
+      try {
+        await supabase.storage.createBucket('attachments', { public: true });
+        console.log("Supabase: Bucket 'attachments' verificado ou criado com sucesso.");
+      } catch (bucketErr) {
+        console.warn("Supabase: Tentativa de criar o bucket 'attachments' falhou (pode já existir):", bucketErr);
+      }
+
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const filePath = `${user?.uid || 'anon'}/${Date.now()}_${sanitizedName}`;
+      
+      const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type || 'application/octet-stream'
+      });
+      
+      if (uploadError) {
+        console.error("Supabase Upload Error:", uploadError);
+        throw new Error(uploadError.message || "Erro desconhecido no upload.");
+      }
+      
+      const { data } = supabase.storage.from('attachments').getPublicUrl(filePath);
+      
+      if (!data?.publicUrl) throw new Error("Erro ao obter a URL pública para o arquivo hospedado.");
+
+      const directUrl = data.publicUrl.trim().replace(/^['"]|['"]$/g, '');
+>>>>>>> a793b99775ef2da61ac69cb824a8b6b48e4ad214
       console.log("Upload via Supabase concluído com sucesso. URL pública:", directUrl);
       
       setAttachment({ title: file.name, type: 'external', url: directUrl });
