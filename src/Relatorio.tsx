@@ -762,106 +762,86 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
     return () => unsubscribe();
   }, [reportId, isCollaborative]);
 
+  // 1. Ouvinte global para direcionar o evento de open-report para pendingReport globalmente
   useEffect(() => {
-    // Listen for custom open event
-    const handleOpenReport = (e: any) => {
-      const detail = e.detail;
-      const id = typeof detail === 'string' ? detail : detail?.id;
-      const mode = detail?.mode;
-      const url = detail?.url;
-      console.log("Relatorio: Evento open-report recebido", { id, detail });
-
-      if (mode === 'view') {
-        setIsSignedMode(true);
-      } else {
-        setIsSignedMode(false);
-      }
-
-      if (url) {
-        hasInitialized.current = true;
-        setLoading(true);
-        const fetchUrl = url.startsWith('/api/proxy-storage') ? url : `/api/proxy-storage?url=${encodeURIComponent(url)}`;
-        fetch(fetchUrl)
-          .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.json();
-          })
-          .then(obj => {
-             if (obj.error) throw new Error(obj.error);
-
-             if (obj.metadata) setMetadata(obj.metadata);
-             
-             if (obj.pages && obj.pages.length > 0) {
-               setPages(obj.pages);
-             } else if (obj.objetivo || obj.historico || obj.conclusao) {
-               setPages(migrateLegacyData(obj));
-             } else {
-               setPages([]);
-             }
-             
-             if (obj.coverElements) setCoverElements(obj.coverElements);
-             setReportId(null);
-             setIsCollaborative(false);
-          })
-          .catch(err => {
-             alert('Erro ao carregar relatório anexado: ' + err.message);
-             console.error(err);
-          })
-          .finally(() => setLoading(false));
-      } else if (id) {
-        hasInitialized.current = true;
-        loadReport(id);
+    const handleOpenReportEvent = (e: any) => {
+      console.log("Relatorio: Evento open-report recebido e encaminhado para pendingReport", e.detail);
+      if (e.detail) {
+        (window as any).pendingReport = e.detail;
       }
     };
-    window.addEventListener('open-report', handleOpenReport);
-    return () => window.removeEventListener('open-report', handleOpenReport);
-  }, [profile, loadReport]); 
+    window.addEventListener('open-report', handleOpenReportEvent);
+    return () => window.removeEventListener('open-report', handleOpenReportEvent);
+  }, []);
 
+  // 2. Intervalo periódico ultra-robusto que verifica pendingReport a cada 150ms e o carrega sem race-conditions
   useEffect(() => {
-    const initialize = async () => {
-      if (hasInitialized.current) return;
-
-      // Check for pending report from global state (attachments)
+    const checkPendingOnInterval = setInterval(() => {
       const pending = (window as any).pendingReport;
       if (pending) {
         hasInitialized.current = true;
-        console.log("Relatorio: Carregando pendente do estado global:", pending);
+        console.log("Relatorio: Detectou relatório pendente no intervalo:", pending);
         delete (window as any).pendingReport;
         
-        if (pending.mode === 'view') {
+        const mode = pending.mode;
+        const url = pending.url;
+        const id = typeof pending === 'string' ? pending : pending.id;
+
+        if (mode === 'view') {
           setIsSignedMode(true);
+        } else {
+          setIsSignedMode(false);
         }
 
-        if (pending.url) {
+        if (url) {
           setLoading(true);
-          try {
-            const fetchUrl = pending.url.startsWith('/api/proxy-storage') ? pending.url : `/api/proxy-storage?url=${encodeURIComponent(pending.url)}`;
-            const res = await fetch(fetchUrl);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const obj = await res.json();
-            if (obj.error) throw new Error(obj.error);
-
-            if (obj.metadata) setMetadata(obj.metadata);
-             
-            if (obj.pages && obj.pages.length > 0) {
-              setPages(obj.pages);
-            } else if (obj.objetivo || obj.historico || obj.conclusao) {
-              setPages(migrateLegacyData(obj));
-            } else {
-              setPages([]);
-            }
-            if (obj.coverElements) setCoverElements(obj.coverElements);
-            setReportId(null);
-            setIsCollaborative(false);
-          } catch(err) {
-            console.error(err);
-            alert('Erro ao carregar relatório anexado (pendente).');
-          } finally {
-            setLoading(false);
-          }
-        } else if (pending.id) {
-          await loadReport(pending.id);
+          const rawUrl = url.trim().replace(/^['"]|['"]$/g, '');
+          const fetchUrl = rawUrl.startsWith('/api/proxy-storage') 
+            ? rawUrl 
+            : `/api/proxy-storage?url=${encodeURIComponent(rawUrl)}`;
+          
+          console.log("Relatorio: Baixando anexo do relatório via proxy:", fetchUrl);
+          fetch(fetchUrl)
+            .then(res => {
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              return res.json();
+            })
+            .then(obj => {
+              if (obj.error) throw new Error(obj.error);
+              if (obj.metadata) setMetadata(obj.metadata);
+              
+              if (obj.pages && obj.pages.length > 0) {
+                setPages(obj.pages);
+              } else if (obj.objetivo || obj.historico || obj.conclusao) {
+                setPages(migrateLegacyData(obj));
+              } else {
+                setPages([]);
+              }
+              if (obj.coverElements) setCoverElements(obj.coverElements);
+              setReportId(null);
+              setIsCollaborative(false);
+            })
+            .catch(err => {
+              console.error("Erro no intervalo ao carregar:", err);
+              alert('Erro ao carregar relatório anexado: ' + err.message);
+            })
+            .finally(() => setLoading(false));
+        } else if (id) {
+          loadReport(id);
         }
+      }
+    }, 150);
+
+    return () => clearInterval(checkPendingOnInterval);
+  }, [loadReport]);
+
+  // 3. Inicializador padrão e carregamento de imagem logotipo
+  useEffect(() => {
+    const initialize = async () => {
+      if (hasInitialized.current) return;
+      
+      // Se houver anexo pendente no estado global, permite que o intervalo o processe primeiro
+      if ((window as any).pendingReport) {
         return;
       }
 
@@ -896,7 +876,7 @@ export function RelatorioWindow({ isMaximized, onClose, onMinimize, onMaximize, 
       } catch (e) { console.error(e); }
     };
     fetchLocalImage();
-  }, [profile, loadReport]);
+  }, [profile, loadReport, reportId, pages.length]);
 
   const handleMetadataChange = (key: keyof RelatorioMetadata, value: string) => {
     trackLocalUpdate();
