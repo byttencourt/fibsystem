@@ -233,42 +233,36 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
     setSending(true);
     setShowAttachments(false);
     try {
-      const { supabase } = await import('../lib/supabase');
-      if (!supabase) {
-        const missing = [];
-        if (!import.meta.env.VITE_SUPABASE_URL) missing.push("VITE_SUPABASE_URL");
-        if (!import.meta.env.VITE_SUPABASE_ANON_KEY) missing.push("VITE_SUPABASE_ANON_KEY");
-        
-        throw new Error(`Configuração do Supabase incompleta. Faltando: ${missing.join(', ')}. Por favor, verifique seu arquivo .env ou as configurações de segredo (Secrets) no painel de controle.`);
-      }
-
-      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const filePath = `${user?.uid || 'anon'}/${Date.now()}_${sanitizedName}`;
-      
-      const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false,
-        contentType: file.type || 'application/octet-stream'
+      const response = await fetch('/api/upload-storage', {
+        method: 'POST',
+        headers: {
+          'x-file-name': file.name,
+          'content-type': file.type || 'application/octet-stream'
+        },
+        body: file
       });
-      
-      if (uploadError) {
-        console.error("Supabase Upload Error:", uploadError);
-        if (uploadError.message.includes('400')) {
-          throw new Error("O Supabase recusou o arquivo (Erro 400). Verifique no painel do Supabase se o bucket 'attachments' permite esta extensão de arquivo (MIME type). " + uploadError.message);
-        }
-        throw new Error("Erro no Supabase: " + uploadError.message);
-      }
-      
-      const { data } = supabase.storage.from('attachments').getPublicUrl(filePath);
-      
-      if (!data?.publicUrl) throw new Error("Erro ao obter URL pública do Supabase");
 
-      const rawUrl = data.publicUrl;
-      const proxiedUrl = `/api/proxy-storage?url=${encodeURIComponent(rawUrl.trim())}`;
+      if (!response.ok) {
+        let errMsg = `Upload falhou (${response.status} ${response.statusText})`;
+        try {
+          const errData = await response.json();
+          errMsg = errData.error || errMsg;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
+
+      const resData = await response.json();
+      if (!resData || !resData.url) {
+        throw new Error("Erro ao obter o link do arquivo retornado pelo servidor.");
+      }
+
+      const directUrl = resData.url.trim().replace(/^['"]|['"]$/g, '');
+      console.log("Upload via Supabase concluído com sucesso. URL pública:", directUrl);
       
-      setAttachment({ title: file.name, type: 'external', url: proxiedUrl });
+      setAttachment({ title: file.name, type: 'external', url: directUrl });
+      alert(`O arquivo "${file.name}" foi importado com sucesso para o Supabase e inserido em anexo!`);
     } catch (err: any) {
-      alert("Erro ao fazer upload do arquivo: " + err.message);
+      alert("Erro ao fazer upload do arquivo para o Supabase: " + err.message);
     } finally {
       setSending(false);
     }
@@ -401,17 +395,23 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                     </div>
                     <input type="text" required value={subject} onChange={(e) => setSubject(e.target.value)} className="bg-transparent border-b border-white/5 pb-2 text-sm text-white w-full outline-none focus:border-blue-500 transition-colors" placeholder="Assunto:" />
                     
-                    <div className="relative">
+                    <div className="relative flex items-center gap-2">
                       <button type="button" onClick={() => { setShowAttachments(!showAttachments); fetchReports(); }} className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 rounded border border-white/5 transition-colors">
                         <Paperclip className="w-3.5 h-3.5" /> {attachment ? attachment.title : 'Anexar Documento ou Arquivo'}
                       </button>
+
+                      {attachment && (
+                        <button type="button" onClick={() => setAttachment(null)} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded text-xs transition-colors border border-red-500/10" title="Remover anexo">
+                          <Trash2 className="w-3 h-3" /> Remover Anexo
+                        </button>
+                      )}
 
                       <AnimatePresence>
                         {showAttachments && (
                           <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }} className="absolute top-full left-0 mt-2 w-72 bg-slate-950 border border-white/10 rounded-lg shadow-2xl p-2 z-50">
                             <label className="flex items-center gap-2 p-2 hover:bg-white/5 rounded cursor-pointer text-xs text-blue-400 mb-2 border-b border-white/5 pb-2">
                               <FileText className="w-4 h-4" /> Enviar Arquivo Local
-                              <input type="file" className="hidden" onChange={handleFileUpload} />
+                              <input type="file" accept=".json,application/json" className="hidden" onChange={handleFileUpload} />
                             </label>
                             <div className="max-h-48 overflow-y-auto custom-scrollbar">
                               {availableReports.map(report => (
@@ -520,25 +520,32 @@ export function EmailWindow({ isMaximized, onClose, onMinimize, onMaximize, onFo
                       <button 
                         onClick={() => {
                           if (selectedEmail.attachmentType === 'external') {
-                            if (selectedEmail.attachmentTitle?.endsWith('.json')) {
+                            const originalUrl = (selectedEmail.attachmentUrl || '').trim().replace(/^['"]|['"]$/g, '');
+                            const isJson = selectedEmail.attachmentTitle?.toLowerCase().endsWith('.json') || 
+                                          originalUrl.toLowerCase().includes('.json') ||
+                                          selectedEmail.attachmentTitle?.toLowerCase().includes('relatorio');
+                            
+                            if (isJson) {
+                              // Define data first to prevent mount race-conditions in RelatorioWindow
+                              (window as any).pendingReport = { url: originalUrl, mode: 'view' };
                               window.dispatchEvent(new CustomEvent('open-window', { detail: 'relatorio' }));
-                              (window as any).pendingReport = { url: selectedEmail.attachmentUrl, mode: 'view' };
                               setTimeout(() => {
                                 window.dispatchEvent(new CustomEvent('open-report', { 
-                                  detail: { url: selectedEmail.attachmentUrl, mode: 'view' }
+                                  detail: { url: originalUrl, mode: 'view' }
                                 }));
                               }, 150);
                             } else {
-                              window.open(selectedEmail.attachmentUrl || '', '_blank');
+                              window.open(originalUrl, '_blank');
                             }
                           } else {
                             const eventName = selectedEmail.attachmentType === 'mandate' ? 'open-mandate' : 'open-report';
                             const windowId = selectedEmail.attachmentType === 'mandate' ? 'mandato' : 'relatorio';
                             
-                            window.dispatchEvent(new CustomEvent('open-window', { detail: windowId }));
-                            
+                            // Define coordinates and data first to prevent mount race-conditions
                             if (windowId === 'mandato') (window as any).pendingMandate = { id: selectedEmail.attachmentId, mode: 'view' };
                             if (windowId === 'relatorio') (window as any).pendingReport = { id: selectedEmail.attachmentId, mode: 'view' };
+                            
+                            window.dispatchEvent(new CustomEvent('open-window', { detail: windowId }));
 
                             setTimeout(() => {
                               window.dispatchEvent(new CustomEvent(eventName, { 
